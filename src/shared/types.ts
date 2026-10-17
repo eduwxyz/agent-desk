@@ -109,7 +109,13 @@ export interface Settings {
   approvalTtlHours: number
   theme: 'system' | 'light' | 'dark'
   openAtLogin?: boolean // so routines run without me opening the app
+  runMaxToolCalls?: number // per reply; default RUN_MAX_TOOL_CALLS
+  runMaxMinutes?: number // per reply; default RUN_MAX_MINUTES
 }
+
+// Per reply, so nothing runs away unattended (a routine at 3 a.m.). Configurable in Settings.
+export const RUN_MAX_TOOL_CALLS = 50
+export const RUN_MAX_MINUTES = 15
 
 export const ENGINES: Record<EngineId, { label: string; cli: string; login: string }> = {
   claude: { label: 'Claude Code', cli: 'claude', login: 'claude auth login' },

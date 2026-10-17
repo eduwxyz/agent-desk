@@ -22,6 +22,8 @@ import {
   useStore,
   EFFORTS,
   ENGINES,
+  RUN_MAX_MINUTES,
+  RUN_MAX_TOOL_CALLS,
   type Agent,
   type AgentColor,
   type Connector,
@@ -1035,6 +1037,23 @@ export function SettingsPage(): ReactNode {
                 step={0.5}
                 value={settings.defaultLimit / 1_000_000}
                 onChange={(e) => updateSettings({ defaultLimit: Math.max(0, Math.round(Number(e.target.value) * 1_000_000)) })}
+              />
+            </Field>
+            <Field label="Ferramentas por resposta" hint="Passou disso, o agente encerra dizendo o que fez.">
+              <input
+                type="number"
+                min={5}
+                step={5}
+                value={settings.runMaxToolCalls ?? RUN_MAX_TOOL_CALLS}
+                onChange={(e) => updateSettings({ runMaxToolCalls: Math.max(5, Math.round(Number(e.target.value))) })}
+              />
+            </Field>
+            <Field label="Minutos por resposta" hint="Vale também pras rotinas, que rodam sem você olhando.">
+              <input
+                type="number"
+                min={1}
+                value={settings.runMaxMinutes ?? RUN_MAX_MINUTES}
+                onChange={(e) => updateSettings({ runMaxMinutes: Math.max(1, Math.round(Number(e.target.value))) })}
               />
             </Field>
             <Field label="Expiração de aprovações">

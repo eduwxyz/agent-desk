@@ -65,7 +65,7 @@ Usuário do MVP: eu, numa máquina só. Quem baixar o repositório usa do mesmo 
   4. Steps já concluídos do run (resultados de ferramenta, aprovações, respostas)
 
   Os itens 1 e 2 vão como system prompt. As ferramentas vêm do gateway.
-- Limites por run, configuráveis: máximo de 25 chamadas de ferramenta (contadas no gateway), 10 min de duração. Ao estourar, o run termina e o agente avisa o que fez até ali.
+- Limites por resposta, configuráveis em Configurações: máximo de 50 chamadas de ferramenta (contadas no gateway) e 15 min de duração (o default do rascunho era 25 e 10, curto demais pra um agente com computador). Passou das chamadas, o gateway recusa as próximas e pede pro agente encerrar dizendo o que fez; se ele insistir, o turno é cortado. Passou do tempo, o turno é cortado e o que ele já escreveu fica.
 - No máximo 4 runs simultâneos. O resto fica em `queued`.
 
 ### 4. Ferramentas embutidas (MVP)
@@ -245,6 +245,7 @@ Até aqui tudo começa com uma mensagem minha. Uma rotina faz o agente trabalhar
 21. **Isolamento do computador (M5):** um comando do agente não enxerga arquivos do Mac fora de `/work`, nenhuma credencial das CLIs está no container, e as portas só respondem em `127.0.0.1`.
 22. **Rotina (M6):** crio "todo dia às 9:00, Lia, resuma as issues abertas no Linear" no #engenharia. Às 9:00 aparece a mensagem da rotina, a Lia responde e chega uma notificação. Com o app fechado às 9:00 e aberto às 9:40, ela roda uma vez, como atrasada; aberto no dia seguinte, não roda a de ontem.
 23. **Rotina com governança (M6):** uma rotina cujo agente já passou do limite não abre a CLI; uma que pede ação sensível fica esperando aprovação, e a execução seguinte não começa enquanto a anterior roda.
+24. **Nada roda solto (M7):** um agente em loop de ferramentas é cortado na 50ª chamada (+3 de tolerância) e um turno travado, nos 15 min; os dois terminam como falha com o motivo. Ao passar de 80% do limite do mês, chega um aviso na conversa e uma notificação, uma vez só.
 
 ## Out of scope (MVP)
 
@@ -336,7 +337,9 @@ Até aqui tudo começa com uma mensagem minha. Uma rotina faz o agente trabalhar
 
 6. **M6, rotinas (feito):** agendador, tela de Rotinas, mensagem de rotina na conversa, notificação ao terminar, abrir ao ligar o Mac. (AC 22, 23) Testado com o Claude Code real: uma rotina na DM da Lia, disparada por Rodar agora, respondeu em 5 s, sem perguntar se podia; a DM é criada ao salvar se ainda não existir. Horário, atraso, pulo após 12 h, uma execução por vez e limite testados com relógio simulado. Abrir ao ligar o Mac só pode ser conferido no app empacotado. Depois: "daqui a 1 minuto me manda uma frase" na DM da Lia virou uma rotina de uma vez em 3 s, que disparou sozinha no minuto seguinte.
 
-O MVP termina quando os seis estiverem prontos e eu usar o app por uma semana no dia a dia.
+7. **M7, pronto pro dia a dia (feito):** limites por resposta (ferramentas e tempo), aviso de 80% do limite, app empacotado (`npm run install-app` instala em /Applications, assinado ad-hoc, sem notarização), uma instância por pasta de dados (duas rodariam as mesmas rotinas) e abrir ao ligar o Mac. (AC 24) O build sai fora de `~/Documents`, porque o iCloud põe atributos do Finder nos arquivos e o `codesign` recusa. Testado o app empacotado com PATH mínimo, como aberto pelo Finder: achou o Claude Code, o Codex e o Docker pelo shell de login e respondeu de verdade.
+
+O MVP termina quando os sete estiverem prontos e eu usar o app por uma semana no dia a dia.
 
 ## Riscos
 

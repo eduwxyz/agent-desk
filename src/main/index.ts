@@ -165,7 +165,15 @@ function createWindow(): BrowserWindow {
   return win
 }
 
-app.whenReady().then(() => {
+// One app per data folder: two would both run the same routines. Opening it
+// again (Dock, Spotlight, at login) just brings the window back. A test run
+// with its own data folder is a separate app.
+if (process.env['AGENT_DESK_DATA']) app.setPath('userData', process.env['AGENT_DESK_DATA'])
+const primary = app.requestSingleInstanceLock()
+if (!primary) app.quit()
+app.on('second-instance', () => showWindow())
+
+if (primary) app.whenReady().then(() => {
   protocol.handle('agentdesk', serveArtifact)
   core = startCore()
   createWindow()

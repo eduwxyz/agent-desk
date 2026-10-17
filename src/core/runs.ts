@@ -3,7 +3,7 @@ import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import type { CoreEvent } from '../shared/rpc'
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
-import { describeSchedule, ENGINES, modelInfo, type Agent, type Approval, type Connector, type ConnectorTool, type Conversation, type EngineId, type Message, type Receipt, type Routine, type Run, type RunStatus, type Settings, type Step } from '../shared/types'
+import { describeSchedule, ENGINES, modelInfo, RUN_MAX_MINUTES, RUN_MAX_TOOL_CALLS, type Agent, type Approval, type Connector, type ConnectorTool, type Conversation, type EngineId, type Message, type Receipt, type Routine, type Run, type RunStatus, type Settings, type Step } from '../shared/types'
 import { HISTORY_LIMIT, mentioned, systemPrompt, transcript } from './context'
 import { LEMBRAR, type Memories } from './memory'
 import { COMPUTER_TOOL_NAMES, COMPUTER_TOOLS, stepFor, type Computers } from './computer'
@@ -21,6 +21,8 @@ const DELTA_FLUSH_MS = 40
 const RETRYABLE: RunStatus[] = ['failed', 'stopped', 'interrupted', 'limit_reached']
 const MAX_RESULT_CHARS = 60_000 // per tool result handed back to the model
 const REASON_PARAM = '_motivo'
+const OVER_CALLS_GRACE = 3 // refused calls tolerated after the cap before the turn is cut
+const USAGE_ALERT = 0.8
 
 export const ASK_USER: ToolDef = {
   name: 'ask_user',
@@ -63,6 +65,10 @@ function exposedName(connector: Connector, tool: string, taken: Set<string>): st
   return name
 }
 
+// "2,4 mi", "850 mil"
+const tokenCount = (n: number): string =>
+  n >= 1_000_000 ? `${(n / 1_000_000).toLocaleString('pt-BR', { maximumFractionDigits: 1 })} mi` : `${Math.round(n / 1000).toLocaleString('pt-BR')} mil`
+
 export function resultText(r: CallToolResult): string {
   const text = r.content
     .map((c) => (c.type === 'text' ? c.text : `[${c.type}]`))
@@ -77,7 +83,7 @@ const clip = (r: CallToolResult): CallToolResult => {
   return { ...r, content: [...images, { type: 'text', text: resultText(rest) }] }
 }
 
-type Control = { ctl: AbortController; reason?: 'stopped' | 'limit' }
+type Control = { ctl: AbortController; reason?: 'stopped' | 'limit' | 'tools' | 'timeout' }
 
 export class Runner {
   private queue: (() => Promise<unknown>)[] = []
@@ -321,6 +327,13 @@ export class Runner {
     const routines = this.deps.gateway ? this.deps.routines : undefined
 
     const control: Control = { ctl: new AbortController() }
+    const maxCalls = settings.runMaxToolCalls ?? RUN_MAX_TOOL_CALLS
+    const maxMinutes = settings.runMaxMinutes ?? RUN_MAX_MINUTES
+    let calls = 0
+    const deadline = setTimeout(() => {
+      control.reason ??= 'timeout'
+      control.ctl.abort()
+    }, maxMinutes * 60_000)
     this.controllers.set(msg.id, control)
 
     let pending = ''
@@ -377,6 +390,14 @@ export class Runner {
     const session = this.deps.gateway?.open({
       tools: toolDefs,
       call: async (name, args) => {
+        if (++calls > maxCalls) {
+          if (calls === maxCalls + 1) addSteps({ id: randomUUID(), label: 'Chegou no limite de ferramentas', detail: `${maxCalls} por resposta`, status: 'error' })
+          if (calls > maxCalls + OVER_CALLS_GRACE && !control.reason) {
+            control.reason = 'tools'
+            control.ctl.abort()
+          }
+          return textResult(`Você chegou no limite de ${maxCalls} chamadas de ferramenta nesta resposta. Não chame mais nenhuma: encerre agora dizendo o que fez e o que falta.`, true)
+        }
         if (name === ASK_USER.name) {
           const q = typeof args['question'] === 'string' ? args['question'].trim() : ''
           if (!q) return textResult('Faltou a pergunta.', true)
@@ -521,6 +542,7 @@ export class Runner {
     } catch (e) {
       error = e instanceof Error ? e.message : String(e)
     } finally {
+      clearTimeout(deadline)
       flush()
       session?.close()
       this.controllers.delete(msg.id)
@@ -533,10 +555,22 @@ export class Runner {
         ? { model: agent.modelId, ms, inputTokens: turnTokens, cacheReadTokens: 0, outputTokens: 0 } // partial: what the stream reported before it ended
         : undefined
     if (receipt) db.addReceipt({ ...receipt, messageId: msg.id, agentId: agent.id, engine: engineId, at: Date.now() })
+    const usedNow = db.usedThisMonth(agent.id)
+    if (used < agent.limit * USAGE_ALERT && usedNow >= agent.limit * USAGE_ALERT && usedNow < agent.limit) {
+      const pct = `${Math.floor((usedNow / agent.limit) * 100)}%`
+      this.post(conv.id, `**${agent.name}** já usou ${pct} do limite do mês (${tokenCount(usedNow)} de ${tokenCount(agent.limit)} tokens). Dá pra aumentar na página dele.`)
+      this.deps.notify?.(`${agent.name} usou ${pct} do limite do mês`, `${tokenCount(usedNow)} de ${tokenCount(agent.limit)} tokens. Dá pra aumentar na página dele.`, conv.id)
+    }
 
     const base = { depth: opts.depth, receipt, question, approvalId: approval?.id, memoryIds: memoryIds.length ? memoryIds : undefined, artifactIds: artifactIds.length ? artifactIds : undefined, services: services.length ? services : undefined, routineIds: routineIds.length ? routineIds : undefined }
     if (control.reason === 'stopped') {
       save({ run: { ...base, status: 'stopped', steps: closeThinking('error', 'Parado') } })
+    } else if (control.reason === 'tools' || control.reason === 'timeout') {
+      const why = control.reason === 'tools' ? `passei de ${maxCalls} chamadas de ferramenta` : `passei de ${maxMinutes} minutos`
+      save({
+        text: msg.text ? `${msg.text} …` : '',
+        run: { ...base, status: 'failed', steps: closeThinking('error', 'Parou no limite da resposta'), error: `Parei: ${why} nesta resposta. O limite fica em Configurações.` }
+      })
     } else if (control.reason === 'limit') {
       save({
         text: msg.text ? `${msg.text} …` : '',
