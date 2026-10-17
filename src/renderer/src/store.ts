@@ -17,6 +17,7 @@ import {
   type MemoryScope,
   type Message,
   type Model,
+  type Project,
   type Routine,
   type RoutineInput,
   type Settings
@@ -347,3 +348,20 @@ export async function lendFolder(agentId: string): Promise<string | null> {
   }
 }
 export const folderAction = (agentId: string, name: string, action: 'read_only' | 'read_write' | 'return'): void => void call('folderAction', { agentId, name, action })
+
+// Ties a channel to a folder (picked on the Mac when `pick`), or changes or removes its project.
+export async function setProject(conversationId: string, project: Project | null, pick = false): Promise<string | null> {
+  if (pick) {
+    const folder = await window.agentDesk.pickFolder()
+    if (!folder) return null
+    const conv = state.conversations.find((c) => c.id === conversationId)
+    project = { files: [], brief: '', access: {}, ...conv?.project, ...project, folder }
+    if (conv?.project?.folder !== folder) project.files = []
+  }
+  try {
+    await call('setProject', { conversationId, project })
+    return null
+  } catch (e) {
+    return e instanceof Error ? e.message : String(e)
+  }
+}

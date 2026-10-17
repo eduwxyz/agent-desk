@@ -486,6 +486,8 @@ function ComputerCard({ agentId, on, onToggle }: { agentId: string; on: boolean;
 // Folders of the Mac this agent's computer sees at /projetos/<name>.
 function LentFolders({ agentId }: { agentId: string }): ReactNode {
   const folders = useStore((s) => agentById(s, agentId)?.folders ?? [])
+  const channels = useStore((s) => s.conversations)
+  const channelName = (id: string): string => channels.find((c) => c.id === id)?.name ?? 'canal'
   const [error, setError] = useState<string | null>(null)
   const home = useStore((s) => s.computers.find((c) => c.agentId === agentId)?.folder.match(/^\/Users\/[^/]+/)?.[0])
   const short = (p: string): string => (home && p.startsWith(home) ? `~${p.slice(home.length)}` : p)
@@ -509,6 +511,15 @@ function LentFolders({ agentId }: { agentId: string }): ReactNode {
                   <code>/projetos/{f.name}</code>
                   <span className="muted small">{short(f.path)}</span>
                 </span>
+                {f.channelId ? (
+                  <span className="muted small">
+                    {f.readOnly ? 'só ler' : 'pode mudar'} · pelo projeto{' '}
+                    <button className="link" onClick={() => navigate({ kind: 'conversation', id: f.channelId! })}>
+                      #{channelName(f.channelId)}
+                    </button>
+                  </span>
+                ) : (
+                <>
                 <div className="segmented" role="radiogroup" aria-label={`Acesso a ${f.name}`}>
                   {(['read_write', 'read_only'] as const).map((a) => (
                     <button key={a} role="radio" aria-checked={f.readOnly === (a === 'read_only')} className={f.readOnly === (a === 'read_only') ? 'is-active' : ''} onClick={() => f.readOnly !== (a === 'read_only') && folderAction(agentId, f.name, a)}>
@@ -519,6 +530,8 @@ function LentFolders({ agentId }: { agentId: string }): ReactNode {
                 <button className="btn btn--sm btn--ghost" onClick={() => folderAction(agentId, f.name, 'return')}>
                   Devolver
                 </button>
+                </>
+                )}
               </div>
             ))}
           </div>

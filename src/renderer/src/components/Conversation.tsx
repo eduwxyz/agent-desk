@@ -30,6 +30,7 @@ import {
 import { AgentAvatar, Icon, MeAvatar, duration, time, tokens, usd } from './ui'
 import { ArtifactCard, ServiceCard, SidePanel } from './Panel'
 import { when } from './Routines'
+import { ProjectPanel } from './Project'
 
 export function ConversationView({ id }: { id: string }): ReactNode {
   const conv = useStore((s) => s.conversations.find((c) => c.id === id))
@@ -37,6 +38,7 @@ export function ConversationView({ id }: { id: string }): ReactNode {
   const members = useStore((s) => (conv ? conv.members.map((m) => agentById(s, m)).filter((a): a is Agent => !!a) : []))
   const messages = useStore((s) => s.messages.filter((m) => m.conversationId === id))
   const [showSummary, setShowSummary] = useState(false)
+  const [showProject, setShowProject] = useState(false)
 
   if (!conv) return <div className="empty">Conversa não encontrada.</div>
   const dmAgent = conv.kind === 'dm' ? members[0] : undefined
@@ -50,6 +52,7 @@ export function ConversationView({ id }: { id: string }): ReactNode {
             <h1>{title}</h1>
             {dmAgent && <span className="tag">{dmAgent.role}</span>}
             {conv.topic && <span className="topbar__topic">{conv.topic}</span>}
+            {conv.project && <span className="tag tag--agent">projeto</span>}
           </div>
           <div className="topbar__actions">
             {conv.kind === 'channel' && (
@@ -62,6 +65,11 @@ export function ConversationView({ id }: { id: string }): ReactNode {
                 <span className="stack__count">{members.length} agente{members.length === 1 ? '' : 's'}</span>
               </div>
             )}
+            {conv.kind === 'channel' && (
+              <button className={`btn btn--ghost ${showProject ? 'is-active' : ''}`} title="Pasta e contexto do projeto deste canal" onClick={() => setShowProject(!showProject)}>
+                <Icon name="folder" size={14} /> Projeto
+              </button>
+            )}
             <button className={`btn btn--ghost ${showSummary ? 'is-active' : ''}`} title="O que esta conversa já cobriu" onClick={() => setShowSummary(!showSummary)}>
               <Icon name="book" size={14} /> Resumo
             </button>
@@ -73,6 +81,7 @@ export function ConversationView({ id }: { id: string }): ReactNode {
           </div>
         </header>
 
+        {showProject && <ProjectPanel conv={conv} members={members} onClose={() => setShowProject(false)} />}
         {showSummary && <SummaryPanel conv={conv} messages={messages} onClose={() => setShowSummary(false)} />}
 
         <MessageList messages={messages} conversationId={id} />

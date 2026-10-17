@@ -46,6 +46,7 @@ export interface LentFolder {
   name: string
   path: string // absolute, on the Mac
   readOnly: boolean
+  channelId?: string // lent by a project channel, managed there
 }
 
 export const PROJECTS_DIR = '/projetos'
@@ -59,8 +60,20 @@ export interface Conversation {
   summary?: string // what the conversation covered before its recent messages
   summaryUntil?: number // `at` of the last message the summary covers
   summaryAt?: number
+  project?: Project // a channel tied to a folder of the Mac (spec §15)
   unread?: number
 }
+
+// What every agent in a project channel knows and gets.
+export interface Project {
+  folder: string // absolute, on the Mac
+  files: string[] // context files, relative to the folder, read again at every reply
+  brief: string // what isn't in the repository: current goal, priorities
+  access: Record<string, 'read_write' | 'read_only'> // agents whose computer gets the folder
+}
+
+export const PROJECT_FILES = ['CLAUDE.md', 'AGENTS.md', 'README.md']
+export const projectScope = (conversationId: string): string => `project:${conversationId}`
 
 export type StepStatus = 'running' | 'done' | 'error'
 export interface Step {

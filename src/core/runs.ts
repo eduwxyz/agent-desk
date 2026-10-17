@@ -1,5 +1,5 @@
 import { mkdirSync } from 'node:fs'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import type { CoreEvent } from '../shared/rpc'
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
@@ -8,6 +8,7 @@ import { HISTORY_LIMIT, mentioned, systemPrompt, transcript } from './context'
 import { LEMBRAR, type Memories } from './memory'
 import { COMPUTER_TOOL_NAMES, COMPUTER_TOOLS, stepFor, type Computers } from './computer'
 import { AGENDAR, CANCELAR, ROUTINE_TOOL_NAMES, type Routines } from './routines'
+import { readContext } from './projects'
 import type { Db } from './db'
 import type { Engine } from './engines/types'
 import { textResult, type Gateway, type ToolDef } from './gateway'
@@ -232,7 +233,7 @@ export class Runner {
 
       const cwd = join(this.deps.workDir, '_router')
       mkdirSync(cwd, { recursive: true })
-      const r = await route({ engine: engines[model.engine], model: model.id, messages: db.recentMessages(conv.id, 20), agents: members, me: settings.workspaceName, connectors: this.deps.connectors?.list(), cwd })
+      const r = await route({ engine: engines[model.engine], model: model.id, messages: db.recentMessages(conv.id, 20), agents: members, me: settings.workspaceName, connectors: this.deps.connectors?.list(), project: conv.project && `${basename(conv.project.folder)}${conv.project.brief ? ` (${conv.project.brief.replace(/\s+/g, ' ').slice(0, 300)})` : ''}`, cwd })
       if (r.usage) db.addReceipt({ ...r.usage, model: model.id, ms: r.ms, messageId: note.id, agentId: 'router', engine: model.engine, at: Date.now() })
       if ('error' in r) return fail(r.error)
 
@@ -508,6 +509,7 @@ export class Runner {
       }
     })
 
+    const promptMemories = memory?.forPrompt(agent, conv)
     let turnTokens = 0
     let result: { text: string; usage: Omit<Receipt, 'model' | 'ms'> } | null = null
     let error: string | null = null
@@ -516,7 +518,17 @@ export class Runner {
       const events = engines[engineId].run({
         model: agent.modelId,
         effort: agent.effort,
-        system: systemPrompt({ agent, settings, conversation: conv, peers, memories: memory?.forPrompt(agent), canRemember, hasComputer: !!computers, routines: routines?.forAgent(agent.id) }),
+        system: systemPrompt({
+          agent,
+          settings,
+          conversation: conv,
+          peers,
+          memories: promptMemories,
+          canRemember,
+          hasComputer: !!computers,
+          routines: routines?.forAgent(agent.id),
+          project: conv.project && { files: readContext(conv.project), memories: promptMemories?.project ?? [] }
+        }),
         prompt: transcript({ agent, conversation: conv, messages: history, agents: db.agents(), me: settings.workspaceName, task: opts.task, summary }),
         cwd,
         signal: control.ctl.signal,

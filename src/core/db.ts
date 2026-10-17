@@ -1,5 +1,5 @@
 import { DatabaseSync } from 'node:sqlite'
-import type { Agent, AgentColor, Approval, ApprovalState, Artifact, ArtifactKind, Author, Connector, ConnectorAuth, ConnectorTool, Conversation, Effort, LentFolder, Memory, MemoryMode, MemoryState, Message, Receipt, Routine, RoutineRun, Run, Settings, ToolClass } from '../shared/types'
+import type { Agent, AgentColor, Approval, ApprovalState, Artifact, ArtifactKind, Author, Connector, ConnectorAuth, ConnectorTool, Conversation, Effort, LentFolder, Memory, MemoryMode, MemoryState, Message, Project, Receipt, Routine, RoutineRun, Run, Settings, ToolClass } from '../shared/types'
 
 // Each entry runs once, in order; PRAGMA user_version records how far we got.
 const MIGRATIONS = [
@@ -170,6 +170,9 @@ const MIGRATIONS = [
   `,
   `
   ALTER TABLE agents ADD COLUMN folders TEXT NOT NULL DEFAULT '[]';
+  `,
+  `
+  ALTER TABLE conversations ADD COLUMN project TEXT;
   `
 ]
 
@@ -303,8 +306,13 @@ export class Db {
       members: members.filter((m) => m.conversation_id === r['id']).map((m) => m.agent_id),
       summary: r['summary'] ? str(r['summary']) : undefined,
       summaryUntil: r['summary_until'] ? Number(r['summary_until']) : undefined,
-      summaryAt: r['summary_at'] ? Number(r['summary_at']) : undefined
+      summaryAt: r['summary_at'] ? Number(r['summary_at']) : undefined,
+      project: r['project'] ? (JSON.parse(str(r['project'])) as Project) : undefined
     }))
+  }
+
+  setProject(conversationId: string, project: Project | undefined): void {
+    this.db.prepare('UPDATE conversations SET project = ? WHERE id = ?').run(project ? JSON.stringify(project) : null, conversationId)
   }
 
   // `until` is the `at` of the last message the summary covers; leave it out to keep it (a hand edit).

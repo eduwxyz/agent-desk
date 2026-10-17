@@ -6,7 +6,7 @@ import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { randomBytes } from 'node:crypto'
 import type { CoreEvent } from '../shared/rpc'
-import { ENGINES, modelInfo, SUMMARY_MAX_AFTER, SUMMARY_WINDOW, type Agent, type Conversation, type EngineId, type Memory, type MemoryScope, type Message, type Settings } from '../shared/types'
+import { ENGINES, modelInfo, projectScope, SUMMARY_MAX_AFTER, SUMMARY_WINDOW, type Agent, type Conversation, type EngineId, type Memory, type MemoryScope, type Message, type Settings } from '../shared/types'
 import type { Db } from './db'
 import type { Engine } from './engines/types'
 import type { ToolDef } from './gateway'
@@ -24,7 +24,12 @@ export const LEMBRAR: ToolDef = {
     type: 'object',
     properties: {
       texto: { type: 'string', description: 'A memória, numa frase curta, autossuficiente e na terceira pessoa (ex.: "Prefere PRs pequenos").' },
-      sobre: { type: 'string', enum: ['usuario', 'agente'], description: '"usuario": sobre a pessoa com quem você fala (vale pra todos os agentes). "agente": sobre o seu trabalho (só você vê).' },
+      sobre: {
+        type: 'string',
+        enum: ['usuario', 'agente', 'projeto'],
+        description:
+          '"usuario": sobre a pessoa com quem você fala (vale pra todos os agentes). "agente": sobre o seu trabalho (só você vê). "projeto": uma decisão ou convenção do projeto deste canal (todos os agentes do canal veem; só em canal de projeto).'
+      },
       substitui: { type: 'string', description: 'Id de uma memória que esta atualiza, quando algo mudou.' }
     },
     required: ['texto', 'sobre']
@@ -120,13 +125,13 @@ export class Memories {
 
   // ---------- reading ----------
 
-  forPrompt(agent: Agent): { aboutMe: Memory[]; own: Memory[] } {
+  forPrompt(agent: Agent, conv?: Conversation): { aboutMe: Memory[]; own: Memory[]; project: Memory[] } {
     const pick = (scope: MemoryScope): Memory[] =>
       this.deps.db
         .memories({ scope, state: 'active' })
         .sort((a, b) => b.confirmedAt - a.confirmedAt)
         .slice(0, PROMPT_CAP)
-    return { aboutMe: pick('me'), own: pick(agent.id) }
+    return { aboutMe: pick('me'), own: pick(agent.id), project: conv?.project ? pick(projectScope(conv.id)) : [] }
   }
 
   // What a turn sees of the conversation: the summary and every message after it.
@@ -262,11 +267,12 @@ export class Memories {
     const text = typeof args['texto'] === 'string' ? args['texto'].trim() : ''
     if (!text) return { reply: 'Faltou o texto da memória.', error: true }
     if (text.length > MAX_MEMORY_CHARS) return { reply: `Memória longa demais: use até ${MAX_MEMORY_CHARS} caracteres, uma ideia só.`, error: true }
-    const scope: MemoryScope = args['sobre'] === 'agente' ? agent.id : 'me'
+    if (args['sobre'] === 'projeto' && !conv.project) return { reply: 'Este canal não é de um projeto: guarde "sobre" usuario ou agente.', error: true }
+    const scope: MemoryScope = args['sobre'] === 'agente' ? agent.id : args['sobre'] === 'projeto' ? projectScope(conv.id) : 'me'
     let replaces: string | undefined
     if (typeof args['substitui'] === 'string' && args['substitui'].trim()) {
       const old = this.deps.db.memory(args['substitui'].trim())
-      if (!old || old.state !== 'active' || (old.scope !== 'me' && old.scope !== agent.id)) return { reply: `Não achei a memória ${args['substitui']} pra substituir.`, error: true }
+      if (!old || old.state !== 'active' || (old.scope !== 'me' && old.scope !== agent.id && old.scope !== projectScope(conv.id))) return { reply: `Não achei a memória ${args['substitui']} pra substituir.`, error: true }
       if (old.scope !== scope) return { reply: `A memória ${old.id} é de outro escopo; use "sobre" igual ao dela.`, error: true }
       replaces = old.id
     }

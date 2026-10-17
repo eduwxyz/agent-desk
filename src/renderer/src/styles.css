@@ -1978,3 +1978,23 @@ table.csv th {
 .folders .hint {
   margin: 0;
 }
+
+/* ---------- projects ---------- */
+.project__folder {
+  font-size: 12px;
+  color: var(--text-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.project .grid2 {
+  margin-top: 4px;
+}
+.project__access {
+  margin: 4px 0 0;
+}
+.project__access .table__row {
+  align-items: center;
+  gap: 10px;
+}

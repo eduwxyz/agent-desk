@@ -19,8 +19,8 @@ export const ROUTER_SYSTEM = [
 
 const GRANT_LABEL = { read: 'só leitura', read_write: 'leitura e escrita' } as const
 
-export function routerPrompt(opts: { messages: Message[]; agents: Agent[]; me: string; connectors?: Connector[] }): string {
-  const { messages, agents, me, connectors = [] } = opts
+export function routerPrompt(opts: { messages: Message[]; agents: Agent[]; me: string; connectors?: Connector[]; project?: string }): string {
+  const { messages, agents, me, connectors = [], project } = opts
   const roster = agents.map((a) => {
     const about = a.instructions.split('\n')[0]?.slice(0, 140)
     const access = connectors.flatMap((c) => {
@@ -37,7 +37,7 @@ export function routerPrompt(opts: { messages: Message[]; agents: Agent[]; me: s
         m.author.kind === 'me' ? me : m.author.kind === 'routine' ? `rotina de ${me}` : (agents.find((a) => m.author.kind === 'agent' && a.id === m.author.id)?.name ?? 'agente')
       return `[${author}] ${m.text.trim().slice(0, 600)}`
     })
-  return ['Agentes no canal:', ...roster, '', 'Conversa (a última é a que precisa de resposta):', ...lines, '', 'Responda só com o JSON.'].join('\n')
+  return [...(project ? [`Este canal é o projeto ${project}.`, ''] : []), 'Agentes no canal:', ...roster, '', 'Conversa (a última é a que precisa de resposta):', ...lines, '', 'Responda só com o JSON.'].join('\n')
 }
 
 // Lenient: models sometimes wrap JSON in a code fence or add a line around it.
@@ -69,6 +69,7 @@ export async function route(opts: {
   agents: Agent[]
   me: string
   connectors?: Connector[]
+  project?: string
   cwd: string
 }): Promise<{ agents: Agent[]; reason: string; usage?: Usage; ms: number } | { error: string; usage?: Usage; ms: number }> {
   const started = Date.now()

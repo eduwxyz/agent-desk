@@ -1,7 +1,9 @@
 // Builds what a turn sends to the engine: a system prompt (stable per agent)
 // and a prompt with the conversation transcript. The CLI keeps no session
 // between turns, so everything the agent knows comes from here.
-import { describeSchedule, PROJECTS_DIR, type Agent, type Conversation, type Memory, type Message, type Routine, type Settings } from '../shared/types'
+import { basename } from 'node:path'
+import { describeSchedule, PROJECTS_DIR, type Agent, type Conversation, type Memory, type Message, type Project, type Routine, type Settings } from '../shared/types'
+import type { ContextFile } from './projects'
 
 export const HISTORY_LIMIT = 30
 
@@ -14,8 +16,9 @@ export function systemPrompt(opts: {
   canRemember?: boolean
   hasComputer?: boolean
   routines?: Routine[] // its own, when it can schedule
+  project?: { files: ContextFile[]; memories: Memory[] } // when the conversation is a project channel
 }): string {
-  const { agent, settings, conversation, peers, memories, canRemember, hasComputer, routines } = opts
+  const { agent, settings, conversation, peers, memories, canRemember, hasComputer, routines, project } = opts
   const me = settings.workspaceName || 'o usuário'
   const where =
     conversation.kind === 'dm'
@@ -40,6 +43,7 @@ export function systemPrompt(opts: {
       ]
         .filter(Boolean)
         .join('\n'),
+    conversation.project && project && projectSection(agent, conversation, conversation.project, project),
     memories && (memories.aboutMe.length > 0 || memories.own.length > 0) && memorySection(me, memories),
     routines && routines.length > 0 && `## Suas rotinas\nPedidos agendados que você roda sozinho. Pra mudar ou apagar, use agendar_rotina com substitui, ou cancelar_rotina.\n${routines.map((r) => `- [${r.id}] ${r.name}: ${describeSchedule(r.schedule).toLowerCase()} · ${r.prompt.replace(/\s+/g, ' ').slice(0, 160)}`).join('\n')}`,
     [
@@ -61,6 +65,24 @@ export function systemPrompt(opts: {
     ]
       .filter(Boolean)
       .join('\n')
+  ]
+    .filter(Boolean)
+    .join('\n\n')
+}
+
+function projectSection(agent: Agent, conv: Conversation, p: Project, ctx: { files: ContextFile[]; memories: Memory[] }): string {
+  const mine = agent.computer ? agent.folders?.find((f) => f.channelId === conv.id) : undefined
+  const read = ctx.files.filter((f) => f.text !== undefined)
+  return [
+    `## Projeto deste canal: ${basename(p.folder)}`,
+    `Todos os agentes de #${conv.name} recebem este contexto.${
+      mine
+        ? ` A pasta do projeto está no seu computador em ${PROJECTS_DIR}/${mine.name}${mine.readOnly ? ' (só leitura: você lê, roda e testa, mas não muda arquivos)' : ''}.`
+        : ' Você não tem a pasta do projeto: o que sabe dele é isto. Quando precisar ver o código, peça a quem tem a pasta no canal.'
+    }`,
+    p.brief && `Do momento, segundo quem coordena:\n${p.brief}`,
+    ctx.memories.length > 0 && `Decisões e convenções do projeto (memória do projeto; guarde novas com lembrar, sobre "projeto"):\n${ctx.memories.map((m) => `- [${m.id}] ${m.text}`).join('\n')}`,
+    ...read.map((f) => `### ${f.path}\n${f.text!.trim()}${f.truncated ? '\n[… cortado]' : ''}`)
   ]
     .filter(Boolean)
     .join('\n\n')

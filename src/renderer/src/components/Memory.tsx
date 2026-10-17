@@ -8,6 +8,7 @@ import {
   forgetMemory,
   isStale,
   navigate,
+  projectScope,
   purgeMemory,
   useStore,
   STALE_DAYS,
@@ -26,6 +27,7 @@ export function MemoryPage(): ReactNode {
   const activeIn = (scope: string): Memory[] => memories.filter((m) => m.scope === scope && m.state === 'active' && !isStale(m)).sort((a, b) => b.confirmedAt - a.confirmedAt)
   const forgotten = memories.filter((m) => m.state === 'forgotten')
   const withNotes = agents.filter((a) => memories.some((m) => m.scope === a.id && m.state === 'active'))
+  const projects = useStore((s) => s.conversations.filter((c) => c.project))
 
   return (
     <Page title="Memória" subtitle="O que os agentes lembram entre conversas. Tudo que está aqui entra no prompt deles, e nada fica escondido nas CLIs.">
@@ -65,6 +67,23 @@ export function MemoryPage(): ReactNode {
         ))}
         <AddMemory scope="me" placeholder={`Ex.: ${me} prefere PRs pequenos, com descrição em bullets.`} />
       </MemorySection>
+
+      {projects.map((c) => (
+        <MemorySection
+          key={c.id}
+          title={
+            <button className="link row row--center" onClick={() => navigate({ kind: 'conversation', id: c.id })}>
+              <Icon name="folder" size={16} /> Projeto #{c.name}
+            </button>
+          }
+          lead="Decisões e convenções. Todos os agentes do canal veem."
+        >
+          {activeIn(projectScope(c.id)).map((m) => (
+            <EditableRow key={m.id} memory={m} />
+          ))}
+          <AddMemory scope={projectScope(c.id)} placeholder="Ex.: A API v1 está congelada; mudanças vão na v2." />
+        </MemorySection>
+      ))}
 
       {withNotes.map((a) => (
         <MemorySection

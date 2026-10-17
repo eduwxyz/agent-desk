@@ -30,6 +30,7 @@ Usuário do MVP: eu, numa máquina só. Quem baixar o repositório usa do mesmo 
 | **Computador** | Um computador Linux isolado (container Docker) de um agente, persistente, onde ele faz qualquer coisa sem pedir. |
 | **Artefato** | Um arquivo que o agente mostra no chat (print, documento, página, planilha), guardado como estava na hora. |
 | **Rotina** | Um pedido agendado pra um agente (dias + horário), que posta numa conversa e roda sozinho. |
+| **Projeto** | Um canal ligado a uma pasta do Mac: todo agente dele recebe os arquivos de contexto e a memória do projeto, e quem tem computador pode receber a pasta. |
 | **Recibo** | Registro de cada turno: motor, modelo, tokens (in/out/cache/raciocínio), duração e, quando a CLI informa, o custo equivalente em API. |
 
 ## Behaviors
@@ -215,6 +216,18 @@ Até aqui tudo começa com uma mensagem minha. Uma rotina faz o agente trabalhar
 - **Pra rodar sem eu lembrar:** fechar a janela não para as rotinas (o app continua aberto no Dock; só Sair para). Em Configurações, **Abrir ao ligar o Mac** (só no app empacotado).
 - Depois: gatilhos por evento (issue no Linear, e-mail, CI quebrado), intervalos ("a cada 2 h") e ícone na barra de menu.
 
+### 15. Projetos (M8)
+
+Um time trabalhando num projeto precisa do mesmo contexto, e sem eu colar nada. Um canal vira um projeto quando eu ligo uma pasta do Mac a ele (botão **Projeto** no topo do canal).
+
+- **Contexto montado:** em toda resposta de qualquer agente do canal, o app lê na hora os arquivos de contexto do projeto (default: os que existirem entre `CLAUDE.md`, `AGENTS.md` e `README.md`; dá pra trocar a lista) e põe no system prompt, com um texto livre "O momento" (objetivo atual, prioridades, prazos). O repositório continua sendo a fonte: mudou o `CLAUDE.md`, a próxima resposta já vê. Até 20 mil caracteres por arquivo e 50 mil no total.
+- **Nunca fora da pasta:** cada arquivo é resolvido com `realpath` e só é lido se continuar dentro da pasta. Um symlink no repositório (que um agente com escrita poderia criar) apontando pra `~/.ssh` não entra no prompt.
+- **Memória do projeto:** um terceiro escopo, além de "sobre mim" e "do agente". Qualquer agente do canal guarda com `lembrar` (`sobre: "projeto"`) decisões e convenções; todos os agentes do canal recebem; fora do canal não aparece. Na tela de Memória, uma seção por projeto, onde eu também escrevo.
+- **Pasta pra quem tem computador:** no painel do projeto, por agente do canal com computador: **Sem pasta**, **Só ler** ou **Pode mudar**. O app empresta a pasta (M5.1) e devolve sozinho quando o acesso, o membro ou o projeto sai. Na página do agente essas pastas aparecem como "pelo projeto #canal", sem controle ali.
+- **Quem não tem a pasta** (um PM sem computador) recebe o mesmo contexto e sabe que, pra ver o código, pede a quem tem.
+- O **router** fica sabendo que o canal é aquele projeto.
+- A pasta passa pelas mesmas regras de M5.1 (dentro da pasta do usuário, nada de `~/Library`, ocultas ou dados do app).
+
 ## Acceptance criteria
 
 1. **Chat básico:** crio um agente no Claude Code, abro DM, mando uma mensagem e vejo a resposta em streaming, com rodapé de modelo/tokens/duração. O mesmo funciona com um agente no Codex.
@@ -250,6 +263,7 @@ Até aqui tudo começa com uma mensagem minha. Uma rotina faz o agente trabalhar
 22. **Rotina (M6):** crio "todo dia às 9:00, Lia, resuma as issues abertas no Linear" no #engenharia. Às 9:00 aparece a mensagem da rotina, a Lia responde e chega uma notificação. Com o app fechado às 9:00 e aberto às 9:40, ela roda uma vez, como atrasada; aberto no dia seguinte, não roda a de ontem.
 23. **Rotina com governança (M6):** uma rotina cujo agente já passou do limite não abre a CLI; uma que pede ação sensível fica esperando aprovação, e a execução seguinte não começa enquanto a anterior roda.
 24. **Nada roda solto (M7):** um agente em loop de ferramentas é cortado na 50ª chamada (+3 de tolerância) e um turno travado, nos 15 min; os dois terminam como falha com o motivo. Ao passar de 80% do limite do mês, chega um aviso na conversa e uma notificação, uma vez só.
+25. **Projeto (M8):** ligo #simula-oab à pasta do projeto; a Lia (com a pasta) e o PM (sem computador) recebem o `CLAUDE.md` e "O momento" no prompt, e só a Lia é avisada de que tem a pasta em `/projetos/`. Uma decisão que a Lia guarda como do projeto chega ao PM no canal e não aparece numa DM. Um symlink pra fora da pasta listado como arquivo de contexto não é lido.
 
 ## Out of scope (MVP)
 
@@ -343,7 +357,9 @@ Até aqui tudo começa com uma mensagem minha. Uma rotina faz o agente trabalhar
 
 7. **M7, pronto pro dia a dia (feito):** limites por resposta (ferramentas e tempo), aviso de 80% do limite, app empacotado (`npm run install-app` instala em /Applications, assinado ad-hoc, sem notarização), uma instância por pasta de dados (duas rodariam as mesmas rotinas) e abrir ao ligar o Mac. (AC 24) O build sai fora de `~/Documents`, porque o iCloud põe atributos do Finder nos arquivos e o `codesign` recusa. Testado o app empacotado com PATH mínimo, como aberto pelo Finder: achou o Claude Code, o Codex e o Docker pelo shell de login e respondeu de verdade.
 
-O MVP termina quando os sete estiverem prontos e eu usar o app por uma semana no dia a dia.
+8. **M8, projetos (feito):** canal ligado a uma pasta, contexto lido a cada resposta, memória do projeto, pasta emprestada por acesso no canal. (AC 25)
+
+O MVP termina quando os oito estiverem prontos e eu usar o app por uma semana no dia a dia.
 
 ## Riscos
 

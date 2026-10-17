@@ -20,6 +20,7 @@ import { Gateway } from './gateway'
 import { mainCipher, plainCipher, Secrets } from './secrets'
 import { checkFolder, Computers, folderName, type Shooter } from './computer'
 import { Memories } from './memory'
+import { cleanFiles, defaultFiles, projectFolders } from './projects'
 import { Routines } from './routines'
 import { Runner } from './runs'
 import { seed } from './seed'
@@ -142,12 +143,23 @@ const runner = new Runner({
 
 void ready.then(async () => {
   connectors.connectAll()
+  syncProjectFolders() // in case a project or membership changed while the app was closed
   for (const a of db.agents()) if (a.computer && !a.archived) void computers.refresh(a)
   await runner.expireApprovals()
   setInterval(() => void runner.expireApprovals(), 60_000).unref()
   routines.start()
 })
 toMain({ type: 'login_item', open: !!settings().openAtLogin })
+
+// Project channels lend their folder to members with access; recomputed whenever
+// a project or a channel's members change.
+function syncProjectFolders(): void {
+  const conversations = db.conversations()
+  for (const agent of db.agents()) {
+    const next = projectFolders(agent, conversations)
+    if (next) setFolders(agent, next)
+  }
+}
 
 function setFolders(agent: Agent, folders: NonNullable<Agent['folders']>): void {
   db.setFolders(agent.id, folders)
@@ -195,6 +207,7 @@ const api: Api = {
     const changed = db.setAgentChannels(clean.id, channelIds)
     emit({ type: 'agent', agent: db.agent(clean.id)! })
     emitConversations(changed)
+    if (changed.length) syncProjectFolders()
   },
 
   createChannel: ({ name }) => {
@@ -259,10 +272,27 @@ const api: Api = {
     if (folders.some((f) => f.path === path)) return
     setFolders(agent, [...folders, { name: folderName(path, folders.map((f) => f.name)), path, readOnly: false }])
   },
+  setProject: ({ conversationId, project }) => {
+    const conv = db.conversation(conversationId)
+    if (!conv || conv.kind !== 'channel') return
+    if (project) {
+      const why = checkFolder(project.folder, { dataDir })
+      if (why) throw new Error(why)
+      const moved = conv.project?.folder !== project.folder
+      const files = cleanFiles(project.files)
+      const access = Object.fromEntries(Object.entries(project.access).filter(([id, a]) => conv.members.includes(id) && (a === 'read_write' || a === 'read_only')))
+      project = { folder: project.folder, files: moved && files.length === 0 ? defaultFiles(project.folder) : files, brief: project.brief.trim(), access }
+    }
+    db.setProject(conv.id, project ?? undefined)
+    emitConversations([conv.id])
+    syncProjectFolders()
+  },
+
   folderAction: ({ agentId, name, action }) => {
     const agent = db.agent(agentId)
     if (!agent) return
     const folders = agent.folders ?? []
+    if (folders.find((f) => f.name === name)?.channelId) return // managed by its project channel
     setFolders(agent, action === 'return' ? folders.filter((f) => f.name !== name) : folders.map((f) => (f.name === name ? { ...f, readOnly: action === 'read_only' } : f)))
   },
   openExternal: ({ url }) => toMain({ type: 'open', url }),

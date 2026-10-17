@@ -1,5 +1,5 @@
 // The contract between the renderer and the core, carried over a MessagePort.
-import type { Agent, Approval, Artifact, ComputerInfo, Connector, ConnectorInput, ConnectorTool, Conversation, EngineId, Memory, MemoryScope, Message, Routine, RoutineInput, Settings } from './types'
+import type { Agent, Approval, Artifact, ComputerInfo, Connector, ConnectorInput, ConnectorTool, Conversation, EngineId, Memory, MemoryScope, Message, Project, Routine, RoutineInput, Settings } from './types'
 
 export interface Snapshot {
   settings: Settings
@@ -44,6 +44,7 @@ export interface Api {
   computerAction(p: { agentId: string; action: 'start' | 'restart' | 'erase' | 'open_folder' | 'refresh' }): void
   stopService(p: { agentId: string; name: string }): void
   lendFolder(p: { agentId: string; path: string }): void // throws why it can't, for the page
+  setProject(p: { conversationId: string; project: Project | null }): void // throws why the folder can't be used
   folderAction(p: { agentId: string; name: string; action: 'read_only' | 'read_write' | 'return' }): void
   openExternal(p: { url: string }): void
   saveRoutine(p: { routine: RoutineInput }): Routine // throws a message for the form
