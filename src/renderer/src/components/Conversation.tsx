@@ -81,7 +81,7 @@ function MessageList({ messages, conversationId }: { messages: Message[]; conver
         <div className="empty">
           <Icon name="spark" size={22} />
           <p>Nada por aqui ainda.</p>
-          <p className="muted">Mencione um agente com @ ou escreva e deixe o router decidir quem responde.</p>
+          <p className="muted">Mencione um agente com @ pra ele responder. Na DM, o agente sempre responde.</p>
         </div>
       </div>
     )
@@ -160,6 +160,8 @@ function MessageRow({ message, grouped }: { message: Message; grouped: boolean }
         ) : null}
         {approval && <ApprovalCard approval={approval} />}
         {message.run?.status === 'stopped' && <div className="note">Interrompido por você.</div>}
+        {message.run?.status === 'interrupted' && <div className="note">Interrompido: o app fechou no meio da resposta.</div>}
+        {message.run?.error && <div className="note note--error">{message.run.error}</div>}
         {message.run?.receipt && <ReceiptLine receipt={message.run.receipt} />}
       </div>
     </article>
@@ -477,7 +479,7 @@ function Composer({ conversationId, members, placeholder }: { conversationId: st
         />
         <div className="composer__bar">
           <span className="composer__hint">
-            {isDm ? 'O agente sempre responde na DM' : '@ chama um agente · sem menção, o router decide'}
+            {isDm ? 'O agente sempre responde na DM' : 'Use @ pra chamar um agente'}
           </span>
           {working.length > 0 ? (
             <button className="btn btn--sm" onClick={() => working.forEach((m) => stopRun(m.id))}>

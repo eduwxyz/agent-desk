@@ -1489,3 +1489,15 @@ h3 {
   display: flex;
   flex-direction: column;
 }
+
+.note--error {
+  color: var(--danger);
+  white-space: pre-wrap;
+}
+.warn-text {
+  color: var(--warn);
+}
+.boot {
+  height: 100%;
+  background: var(--bg);
+}

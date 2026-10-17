@@ -1,5 +1,29 @@
-import { app, BrowserWindow, shell } from 'electron'
+import { app, BrowserWindow, ipcMain, MessageChannelMain, shell, utilityProcess, type UtilityProcess } from 'electron'
 import { join } from 'node:path'
+
+let core: UtilityProcess | null = null
+
+// The core (database, engines, runs) lives in its own process so agent work
+// never blocks the window or the main process.
+function startCore(): UtilityProcess {
+  const child = utilityProcess.fork(join(import.meta.dirname, 'core.js'), [], {
+    serviceName: 'agent-desk-core',
+    env: { ...process.env, AGENT_DESK_DATA: process.env['AGENT_DESK_DATA'] ?? app.getPath('userData') }
+  })
+  child.on('exit', (code) => {
+    console.error(`[main] core exited with code ${code}`)
+    if (core === child) core = null
+  })
+  return child
+}
+
+// Each page load asks for a port; one end goes to the core, the other to the page.
+ipcMain.on('core:connect', (event) => {
+  core ??= startCore()
+  const { port1, port2 } = new MessageChannelMain()
+  core.postMessage(null, [port1])
+  event.sender.postMessage('core:port', null, [port2])
+})
 
 function createWindow(): void {
   const win = new BrowserWindow({
@@ -13,6 +37,7 @@ function createWindow(): void {
     trafficLightPosition: { x: 16, y: 18 },
     backgroundColor: '#f7f7f5',
     webPreferences: {
+      preload: join(import.meta.dirname, '../preload/index.cjs'),
       sandbox: true,
       contextIsolation: true,
       nodeIntegration: false
@@ -35,6 +60,7 @@ function createWindow(): void {
 }
 
 app.whenReady().then(() => {
+  core = startCore()
   createWindow()
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
@@ -43,4 +69,8 @@ app.whenReady().then(() => {
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit()
+})
+
+app.on('will-quit', () => {
+  core?.kill()
 })

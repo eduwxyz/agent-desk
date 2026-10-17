@@ -10,7 +10,7 @@ import {
 } from '../store'
 import { AgentAvatar, Icon, type IconName } from './ui'
 
-const same = (a: View, b: View): boolean => JSON.stringify(a) === JSON.stringify(b)
+const same = (a: View | null, b: View): boolean => JSON.stringify(a) === JSON.stringify(b)
 
 function NavItem({ view, icon, label, badge }: { view: View; icon: IconName; label: string; badge?: number }): ReactNode {
   const active = useStore((s) => same(s.view, view))
@@ -33,7 +33,7 @@ export function Sidebar(): ReactNode {
 
   const submitChannel = (): void => {
     const clean = name.trim().toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9_-]/g, '')
-    if (clean) navigate({ kind: 'conversation', id: createChannel(clean) })
+    if (clean) void createChannel(clean)
     setName('')
     setAdding(false)
   }
@@ -126,7 +126,7 @@ export function Sidebar(): ReactNode {
 }
 
 function ChannelItem({ id, name, unread }: { id: string; name: string; unread?: number }): ReactNode {
-  const active = useStore((s) => s.view.kind === 'conversation' && s.view.id === id)
+  const active = useStore((s) => s.view?.kind === 'conversation' && s.view.id === id)
   return (
     <button className={`nav-item ${active ? 'is-active' : ''} ${unread ? 'is-unread' : ''}`} onClick={() => navigate({ kind: 'conversation', id })}>
       <Icon name="hash" />
@@ -137,7 +137,7 @@ function ChannelItem({ id, name, unread }: { id: string; name: string; unread?: 
 }
 
 function DmItem({ id, name, color }: { id: string; name: string; color: Parameters<typeof AgentAvatar>[0]['agent']['color'] }): ReactNode {
-  const active = useStore((s) => s.view.kind === 'conversation' && s.view.id === id)
+  const active = useStore((s) => s.view?.kind === 'conversation' && s.view.id === id)
   const working = useStore((s) => s.messages.some((m) => m.conversationId === id && m.run?.status === 'working'))
   return (
     <button className={`nav-item ${active ? 'is-active' : ''}`} onClick={() => navigate({ kind: 'conversation', id })}>
@@ -150,7 +150,7 @@ function DmItem({ id, name, color }: { id: string; name: string; color: Paramete
 
 function AgentItem({ id }: { id: string }): ReactNode {
   const agent = useStore((s) => agentById(s, id))
-  const active = useStore((s) => s.view.kind === 'agent' && s.view.id === id)
+  const active = useStore((s) => s.view?.kind === 'agent' && s.view.id === id)
   if (!agent) return null
   const pct = agent.limit > 0 ? agent.used / agent.limit : 1
   return (

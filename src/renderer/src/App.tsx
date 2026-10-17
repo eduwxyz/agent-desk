@@ -13,6 +13,8 @@ export function App(): ReactNode {
     else document.documentElement.dataset['theme'] = theme
   }, [theme])
 
+  if (!view) return <div className="boot" />
+
   return (
     <div className="app">
       <Sidebar />

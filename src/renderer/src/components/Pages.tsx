@@ -2,11 +2,11 @@ import { useEffect, useState, type ReactNode } from 'react'
 import {
   agentById,
   navigate,
+  loginEngine,
   newAgentDraft,
   openDm,
+  refreshEngines,
   saveAgent,
-  setAgentChannels,
-  setGrant,
   setToolClass,
   updateSettings,
   useStore,
@@ -82,11 +82,9 @@ export function AgentPage({ id }: { id?: string }): ReactNode {
     setSaved(false)
   }
 
-  const save = (): void => {
+  const save = async (): Promise<void> => {
     if (!canSave) return
-    saveAgent(draft)
-    setAgentChannels(draft.id, chosen)
-    Object.entries(draft.grants).forEach(([c, lvl]) => setGrant(draft.id, c, lvl))
+    await saveAgent(draft, chosen)
     if (isNew) navigate({ kind: 'agent', id: draft.id })
     else setSaved(true)
   }
@@ -109,12 +107,12 @@ export function AgentPage({ id }: { id?: string }): ReactNode {
       actions={
         <>
           {!isNew && (
-            <button className="btn btn--ghost" onClick={() => openDm(draft.id)}>
+            <button className="btn btn--ghost" onClick={() => void openDm(draft.id)}>
               Abrir DM
             </button>
           )}
           {saved && <span className="saved">Salvo</span>}
-          <button className="btn btn--primary" disabled={!canSave} onClick={save}>
+          <button className="btn btn--primary" disabled={!canSave} onClick={() => void save()}>
             {isNew ? 'Criar agente' : 'Salvar'}
           </button>
         </>
@@ -312,11 +310,14 @@ export function AgentPage({ id }: { id?: string }): ReactNode {
   )
 }
 
-function Card({ title, lead, children }: { title: string; lead?: string; children: ReactNode }): ReactNode {
+function Card({ title, lead, action, children }: { title: string; lead?: string; action?: ReactNode; children: ReactNode }): ReactNode {
   return (
     <div className="card">
       <div className="card__head">
-        <h2>{title}</h2>
+        <div className="row row--between">
+          <h2>{title}</h2>
+          {action}
+        </div>
         {lead && <p className="muted">{lead}</p>}
       </div>
       {children}
@@ -598,7 +599,15 @@ export function SettingsPage(): ReactNode {
           </Field>
         </Card>
 
-        <Card title="Motores" lead="Os agentes rodam nas CLIs instaladas aqui, com o login de cada uma. O app nunca vê nem guarda suas credenciais.">
+        <Card
+          title="Motores"
+          lead="Os agentes rodam nas CLIs instaladas aqui, com o login de cada uma. O app nunca vê nem guarda suas credenciais."
+          action={
+            <button className="btn btn--ghost btn--sm" onClick={refreshEngines}>
+              Verificar de novo
+            </button>
+          }
+        >
           {(Object.keys(ENGINES) as EngineId[]).map((e) => {
             const st = settings.engines[e]
             return (
@@ -621,13 +630,10 @@ export function SettingsPage(): ReactNode {
                       `Instale a CLI ${ENGINES[e].cli} e volte aqui.`
                     )}
                   </span>
+                  {st.warning && <span className="small warn-text">{st.warning}</span>}
                 </div>
                 {st.installed && (
-                  <button
-                    className="btn"
-                    title={`Abre o Terminal com: ${ENGINES[e].login}`}
-                    onClick={() => updateSettings({ engines: { ...settings.engines, [e]: { ...st, loggedIn: !st.loggedIn } } })}
-                  >
+                  <button className="btn" title={`Abre o Terminal com: ${ENGINES[e].login}`} onClick={() => loginEngine(e)}>
                     {st.loggedIn ? 'Trocar conta' : 'Entrar'}
                   </button>
                 )}
