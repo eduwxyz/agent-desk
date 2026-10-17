@@ -64,7 +64,7 @@ export interface Receipt {
   apiCostUsd?: number // what the same usage would cost on the API, when the CLI reports it
 }
 
-export type RunStatus = 'working' | 'waiting_approval' | 'done' | 'stopped' | 'limit_reached' | 'failed' | 'interrupted'
+export type RunStatus = 'working' | 'waiting_input' | 'waiting_approval' | 'done' | 'stopped' | 'limit_reached' | 'failed' | 'interrupted'
 
 export interface Run {
   status: RunStatus
@@ -72,6 +72,8 @@ export interface Run {
   receipt?: Receipt
   approvalId?: string
   error?: string
+  depth?: number // 1 when a human message triggered it, +1 for each agent-to-agent hop
+  question?: string // asked with ask_user; answered by the next human message here
 }
 
 export type Author = { kind: 'me' } | { kind: 'agent'; id: string } | { kind: 'system' }

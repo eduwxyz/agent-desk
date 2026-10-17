@@ -7,6 +7,7 @@ import type { Agent, EngineId, Message, Settings } from '../src/shared/types'
 import { Db } from '../src/core/db'
 import { fakeEngine } from '../src/core/engines/fake'
 import type { Engine, Turn } from '../src/core/engines/types'
+import { Gateway } from '../src/core/gateway'
 import { Runner } from '../src/core/runs'
 
 const ready = { installed: true, loggedIn: true }
@@ -83,13 +84,75 @@ describe('Runner', () => {
     expect(replies.find((m) => (m.author as { id: string }).id === 'a2')?.text).toContain('codex · gpt-5.6-luna')
   })
 
-  it('in a channel without a mention, nobody answers and a hint is posted', async () => {
+  it('in a channel without a mention, the router picks who answers and leaves a receipt', async () => {
+    db.saveAgent(agent('a1', 'lia', { role: 'Engenharia' }))
+    db.saveAgent(agent('a2', 'theo', { role: 'Dados', modelId: 'gpt-5.6-luna' }))
+    const r = runner()
+    await r.send('c1', 'qual foi a receita da semana?')
+    await r.idle()
+    const replies = agentMessages()
+    expect(replies.map((m) => (m.author as { id: string }).id)).toEqual(['a2'])
+    const note = db.messages().find((m) => m.author.kind === 'system')!
+    expect(note.text).toContain('Chamei **theo**')
+    expect(note.run).toBeUndefined()
+    expect(db.receiptTotals(note.id).tokens).toBeGreaterThan(0)
+    expect(db.usedThisMonth('a1')).toBe(0) // the router's tokens are not charged to agents
+  })
+
+  it('the router can decide that nobody answers', async () => {
     const r = runner()
     await r.send('c1', 'bom dia')
     await r.idle()
     expect(agentMessages()).toHaveLength(0)
-    expect(db.messages().at(-1)?.author.kind).toBe('system')
-    expect(claude.turns).toHaveLength(0)
+    expect(db.messages().at(-1)?.text).toContain('Ninguém precisa responder')
+  })
+
+  it('reports a router failure and asks for a mention', async () => {
+    settings.routerModel = 'gpt-5.6-luna'
+    settings.engines.codex = { installed: true, loggedIn: false }
+    const r = runner()
+    await r.send('c1', 'alguém?')
+    await r.idle()
+    expect(agentMessages()).toHaveLength(0)
+    expect(db.messages().at(-1)?.text).toContain('Mencione um agente')
+  })
+
+  it('an agent mentioning another hands it the turn, and the chain stops at depth 3', async () => {
+    // Every reply mentions the other agent: a ping-pong that must stop.
+    const pingPong = fakeEngine('claude', { delayMs: 1, reply: (t) => (t.system.startsWith('Você é lia') ? '@theo, sua vez' : '@lia, sua vez') })
+    const r = runner(pingPong)
+    settings.engines.codex = ready
+    db.saveAgent(agent('a2', 'theo')) // same engine as lia, so both use the ping-pong fake
+    await r.send('c1', '@lia começa')
+    await r.idle()
+    const replies = agentMessages()
+    expect(replies.map((m) => [(m.author as { id: string }).id, m.run?.depth])).toEqual([
+      ['a1', 1],
+      ['a2', 2],
+      ['a1', 3]
+    ])
+    expect(db.messages().at(-1)?.text).toContain('Parei a conversa entre agentes')
+  })
+
+  it('retries a failed reply in place', async () => {
+    let fail = true
+    const flaky: Engine = {
+      id: 'claude',
+      run: (t) => (fail ? (async function* () { yield { type: 'error' as const, message: 'caiu' } })() : fakeEngine('claude', { delayMs: 1 }).run(t))
+    }
+    const r = runner(flaky)
+    await r.send('d1', 'oi')
+    await r.idle()
+    const failed = agentMessages()[0]!
+    expect(failed.run?.status).toBe('failed')
+
+    fail = false
+    r.retry(failed.id)
+    await r.idle()
+    expect(agentMessages()).toHaveLength(1)
+    const retried = db.message(failed.id)!
+    expect(retried.run?.status).toBe('done')
+    expect(retried.run?.error).toBeUndefined()
   })
 
   it('stops mid-turn when the usage limit is crossed, then refuses the next turn without starting the engine', async () => {
@@ -157,5 +220,43 @@ describe('Db', () => {
     db.addReceipt({ messageId: 'x', agentId: 'a1', engine: 'claude', model: 'sonnet', inputTokens: 500, cacheReadTokens: 0, outputTokens: 0, ms: 1, at: lastMonth })
     db.addReceipt({ messageId: 'y', agentId: 'a1', engine: 'claude', model: 'sonnet', inputTokens: 70, cacheReadTokens: 0, outputTokens: 30, ms: 1, at: Date.now() })
     expect(db.usedThisMonth('a1')).toBe(100)
+  })
+})
+
+describe('ask_user through the gateway', () => {
+  let gateway: Gateway
+
+  beforeEach(async () => {
+    gateway = new Gateway()
+    await gateway.start()
+    return () => gateway.stop()
+  })
+
+  it('leaves the run waiting for input, and the next human message goes back to the asker', async () => {
+    claude = counted(fakeEngine('claude', { delayMs: 1 }))
+    const r = new Runner({
+      db,
+      engines: { claude, codex: fakeEngine('codex', { delayMs: 1 }) },
+      settings: async () => settings,
+      emit: (e) => events.push(e),
+      workDir: mkdtempSync(join(tmpdir(), 'ad-work-')),
+      gateway
+    })
+    await r.send('c1', '@lia me pergunta o que faltar')
+    await r.idle()
+    const [asked] = agentMessages()
+    expect(asked?.run).toMatchObject({ status: 'waiting_input', question: 'Pra quando você precisa disso?' })
+    expect(asked?.run?.steps.map((s) => s.label)).toEqual(['Pensou', 'Perguntou a você', 'Respondeu'])
+    expect(claude.turns[0]?.mcpUrl).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/mcp\/[a-f0-9]{48}$/)
+
+    // No mention and two agents in the channel, but Lia asked: she answers, not the router.
+    await r.send('c1', 'até sexta')
+    await r.idle()
+    expect(db.message(asked!.id)?.run?.status).toBe('done')
+    const replies = agentMessages()
+    expect(replies).toHaveLength(2)
+    expect((replies[1]!.author as { id: string }).id).toBe('a1')
+    expect(claude.turns[1]?.prompt).toContain('pergunta enviada a Edu pela ferramenta ask_user: Pra quando você precisa disso?')
+    expect(db.messages().some((m) => m.text.startsWith('Chamei'))).toBe(false)
   })
 })

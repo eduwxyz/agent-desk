@@ -1,10 +1,16 @@
 import { lastLines, num, parseJson, runCli, type Parser } from './cli'
 import type { Engine, EngineEvent, Turn } from './types'
 
+export const GATEWAY_NAME = 'agentdesk'
+
 // Flags that keep the CLI isolated: no built-in tools (shell, files, web), no
 // user settings, hooks, plugins or MCP servers, and no saved session. Not
-// --bare: it turns off the subscription login.
-export function claudeArgs(turn: Pick<Turn, 'model' | 'effort' | 'system'>): string[] {
+// --bare: it turns off the subscription login. The app's gateway, when given,
+// is the only MCP server, and its tools are pre-allowed: the gateway decides.
+export function claudeArgs(turn: Pick<Turn, 'model' | 'effort' | 'system' | 'mcpUrl'>): string[] {
+  const gateway = turn.mcpUrl
+    ? ['--mcp-config', JSON.stringify({ mcpServers: { [GATEWAY_NAME]: { type: 'http', url: turn.mcpUrl } } }), '--allowedTools', `mcp__${GATEWAY_NAME}`]
+    : []
   return [
     '-p',
     '--output-format', 'stream-json',
@@ -16,7 +22,8 @@ export function claudeArgs(turn: Pick<Turn, 'model' | 'effort' | 'system'>): str
     '--tools', '',
     '--strict-mcp-config',
     '--setting-sources', '',
-    '--no-session-persistence'
+    '--no-session-persistence',
+    ...gateway
   ]
 }
 
@@ -25,6 +32,8 @@ export function claudeParser(): Parser {
   let callInput = 0
   let callOutput = 0
   let finished = false
+  let wroteText = false // text from an earlier model call in this turn
+  let newCall = false
 
   return {
     line(line) {
@@ -40,10 +49,17 @@ export function claudeParser(): Parser {
           const u = ((e['message'] as Record<string, unknown> | undefined)?.['usage'] ?? {}) as Record<string, unknown>
           callInput = num(u['input_tokens']) + num(u['cache_read_input_tokens']) + num(u['cache_creation_input_tokens'])
           callOutput = 0
+          newCall = true
           out.push({ type: 'progress', tokens: doneTokens + callInput })
         } else if (e['type'] === 'content_block_delta') {
           const d = e['delta'] as Record<string, unknown> | undefined
-          if (d?.['type'] === 'text_delta' && typeof d['text'] === 'string') out.push({ type: 'text', delta: d['text'] })
+          if (d?.['type'] === 'text_delta' && typeof d['text'] === 'string') {
+            // Text around tool calls comes in separate model calls; keep them as paragraphs.
+            const sep = newCall && wroteText ? '\n\n' : ''
+            newCall = false
+            wroteText = true
+            out.push({ type: 'text', delta: sep + d['text'] })
+          }
         } else if (e['type'] === 'message_delta') {
           callOutput = num((e['usage'] as Record<string, unknown> | undefined)?.['output_tokens'])
           out.push({ type: 'progress', tokens: doneTokens + callInput + callOutput })

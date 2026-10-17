@@ -23,8 +23,13 @@ export function systemPrompt(opts: { agent: Agent; settings: Pick<Settings, 'wor
       `- ${where}`,
       '- Escreva só o texto da sua mensagem no chat, em Markdown. Não comece com seu nome nem com prefixos como "[Você]:".',
       '- Seja direto e natural, como num chat de trabalho.',
-      '- Por enquanto você não tem ferramentas: não consegue consultar sistemas, abrir PRs, ler arquivos nem rodar comandos. Não diga que fez nem que vai fazer essas coisas; se precisar delas, diga o que faria e peça o que falta.'
-    ].join('\n')
+      peers.length > 0 &&
+        '- Se outro agente do canal for mais indicado pra uma parte, mencione-o com @handle na sua resposta: ele responde em seguida. Só mencione quando precisar mesmo.',
+      `- Se precisar de uma informação de ${me} pra continuar, use a ferramenta ask_user com uma pergunta curta e encerre a resposta. A resposta chega na próxima mensagem.`,
+      '- Fora isso, você não tem ferramentas: não consegue consultar sistemas, abrir PRs, ler arquivos nem rodar comandos. Não diga que fez nem que vai fazer essas coisas; se precisar delas, diga o que faria e peça o que falta.'
+    ]
+      .filter(Boolean)
+      .join('\n')
   ]
     .filter(Boolean)
     .join('\n\n')
@@ -42,9 +47,13 @@ export function transcript(opts: { agent: Agent; conversation: Conversation; mes
     return a ? `${a.name}${a.id === agent.id ? ' (você)' : ''} · agente` : 'agente removido'
   }
 
+  // A question asked with ask_user is part of what the agent said.
+  const body = (m: Message): string =>
+    [m.text.trim(), m.run?.question && `(pergunta enviada a ${me} pela ferramenta ask_user: ${m.run.question})`].filter(Boolean).join('\n\n')
+
   const lines = messages
-    .filter((m) => m.text.trim() && m.author.kind !== 'system')
-    .map((m) => `[${name(m)} · ${clock(m.at)}]\n${m.text.trim()}`)
+    .filter((m) => m.author.kind !== 'system' && body(m))
+    .map((m) => `[${name(m)} · ${clock(m.at)}]\n${body(m)}`)
 
   const where = conversation.kind === 'dm' ? `DM com ${me}` : `#${conversation.name}`
   return [`Conversa em ${where}, das mais antigas pras mais novas:`, ...lines, `Responda à última mensagem como ${agent.name}.`].join('\n\n')

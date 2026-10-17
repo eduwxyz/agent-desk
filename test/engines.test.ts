@@ -51,6 +51,20 @@ describe('Claude Code stream', () => {
     expect(feed(claudeParser(), ['not json', '{"type":"rate_limit_event"}', '{"type":"something_new"}'], 0)).toHaveLength(1) // only the "no result" error
   })
 
+  it('separates text from model calls before and after a tool call', () => {
+    const start = '{"type":"stream_event","event":{"type":"message_start","message":{"usage":{"input_tokens":5}}}}'
+    const delta = (t: string): string => JSON.stringify({ type: 'stream_event', event: { type: 'content_block_delta', delta: { type: 'text_delta', text: t } } })
+    expect(text(feed(claudeParser(), [start, delta('Vou perguntar.'), start, delta('Pronto.')]))).toBe('Vou perguntar.\n\nPronto.')
+  })
+
+  it('gets the gateway as its only MCP server, with its tools pre-allowed', () => {
+    const args = claudeArgs({ model: 'sonnet', effort: 'low', system: 'x', mcpUrl: 'http://127.0.0.1:1/mcp/abc' })
+    expect(JSON.parse(args[args.indexOf('--mcp-config') + 1]!)).toEqual({ mcpServers: { agentdesk: { type: 'http', url: 'http://127.0.0.1:1/mcp/abc' } } })
+    expect(args[args.indexOf('--allowedTools') + 1]).toBe('mcp__agentdesk')
+    expect(args).toContain('--strict-mcp-config')
+    expect(claudeArgs({ model: 'sonnet', effort: 'low', system: 'x' })).not.toContain('--mcp-config')
+  })
+
   it('runs isolated: no built-in tools, no user settings, no session, never --bare', () => {
     const args = claudeArgs({ model: 'sonnet', effort: 'medium', system: 'x' })
     expect(args).toEqual(expect.arrayContaining(['-p', '--strict-mcp-config', '--no-session-persistence']))
@@ -85,6 +99,13 @@ describe('Codex exec stream', () => {
     expect(args[args.indexOf('-s') + 1]).toBe('read-only')
     expect(args[args.indexOf('-C') + 1]).toBe('/tmp/x')
     expect(args).toContain('developer_instructions="Você é \\"Theo\\"."')
+    expect(args.at(-1)).toBe('-')
+  })
+
+  it('gets the gateway as its only MCP server, with approval delegated to the gateway', () => {
+    const args = codexArgs({ model: 'gpt-5.6-luna', effort: 'low', system: 'x', cwd: '/tmp/x', mcpUrl: 'http://127.0.0.1:1/mcp/abc' })
+    expect(args).toContain('mcp_servers.agentdesk.url="http://127.0.0.1:1/mcp/abc"')
+    expect(args).toContain('mcp_servers.agentdesk.default_tools_approval_mode="approve"')
     expect(args.at(-1)).toBe('-')
   })
 })

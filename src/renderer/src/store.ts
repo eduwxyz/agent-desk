@@ -301,6 +301,7 @@ export const sendMessage = (conversationId: string, text: string): void => {
 }
 
 export const stopRun = (messageId: string): void => void call('stopRun', { messageId })
+export const retryRun = (messageId: string): void => void call('retryRun', { messageId })
 
 // Approvals arrive with the gateway in M3; until then there are none to decide.
 export function decideApproval(id: string, decision: 'approved' | 'refused', reason?: string): void {

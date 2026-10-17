@@ -4,7 +4,7 @@ App desktop (Electron) onde você conversa com um time de agentes de IA em canai
 
 Os agentes rodam nas CLIs que você já usa, com a sua assinatura: [Claude Code](https://code.claude.com) (`claude`) e [Codex](https://github.com/openai/codex) (`codex`). Sem chave de API e sem cobrança por uso. O app nunca vê nem guarda suas credenciais.
 
-Status: **M1, chat de verdade.** Agentes respondem em canais (por @menção) e DMs pelo Claude Code ou pelo Codex, com streaming, recibos e limite de tokens por agente, tudo salvo em SQLite. Ainda não tem router, ferramentas nem aprovações: conectores e aprovações na interface são dados de exemplo. Spec do MVP em [`docs/spec-mvp.md`](docs/spec-mvp.md).
+Status: **M2, quem responde.** Agentes respondem em canais e DMs pelo Claude Code ou pelo Codex, com streaming, recibos e limite de tokens por agente, tudo salvo em SQLite. Sem menção, um router escolhe quem responde. Agentes passam a vez uns pros outros com @menção (até 3 seguidas), podem te fazer uma pergunta e respostas que falharam podem ser refeitas. Conectores e aprovações na interface ainda são dados de exemplo (M3). Spec do MVP em [`docs/spec-mvp.md`](docs/spec-mvp.md).
 
 ## Rodar
 
@@ -40,6 +40,7 @@ Os dados ficam em `~/Library/Application Support/agent-desk/agent-desk.db` (macO
 - **core** (utility process): SQLite, motores e runs. Nada de agente roda na janela.
 - **renderer** (React): conversa com o core por um `MessagePort`.
 - **Motores:** cada resposta abre a CLI isolada (`claude -p` ou `codex exec`), sem ferramentas embutidas, sem a sua configuração pessoal e sem sessão salva. O contexto (workspace, instruções do agente, últimas 30 mensagens) é montado pelo app a cada turno.
+- **Gateway:** um servidor MCP local do app é a única fonte de ferramentas da CLI. Cada turno recebe uma URL secreta com só as ferramentas daquele agente; chamadas fora da lista são recusadas.
 
 ## Licença
 

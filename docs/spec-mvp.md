@@ -243,8 +243,8 @@ Expostas pelo gateway, como qualquer outra. Todas as demais vêm de conectores M
 
 0. **M0, interface navegável (feito):** todas as telas com dados simulados e um agente fake que responde em streaming.
 1. **M1, núcleo do chat (feito):** casca Electron + core + RPC, SQLite, agentes, canais/DMs, motores Claude Code e Codex, streaming, recibos e limites. (AC 1, 8, 9, 12, 13, 14) Em canal com mais de um agente, até o router chegar, só responde quem for @mencionado. AC 12 ainda não foi medido com 4 runs e resposta de 2 MB.
-2. **M2, quem responde:** router, menções, anti-loop, fila de runs, `ask_user`, interrupção/retomada. (AC 2, 3, 4, 11)
-3. **M3, governança de ferramentas:** gateway, conectores MCP, classificação, grants, aprovações. (AC 5, 6, 7, 10)
+2. **M2, quem responde (feito):** router, menções, anti-loop, fila de runs, `ask_user`, retomada. (AC 2, 3, 4, 11) O gateway entrou aqui, com `ask_user` como primeira ferramenta, pra validar cedo que as duas CLIs usam ferramentas do app. "Retomar" refaz a resposta inteira no lugar (não há passo a passo pra continuar enquanto não houver ferramentas de conector).
+3. **M3, governança de ferramentas:** conectores MCP plugados no gateway, classificação, grants, aprovações. (AC 5, 6, 7, 10)
 
 O MVP termina quando os três estiverem prontos e eu usar o app por uma semana no dia a dia.
 

@@ -1,4 +1,4 @@
-// Opens the built app with Playwright and saves screenshots of the main screens.
+// Opens the built app with Playwright and saves screenshots of the main flows.
 // Uses a fresh data directory and the fake engines, so nothing touches your
 // real database or spends your subscription. Pass --real to use the real CLIs.
 import { _electron as electron } from 'playwright'
@@ -23,41 +23,46 @@ win.on('pageerror', (e) => errors.push(String(e)))
 win.on('console', (m) => m.type() === 'error' && errors.push(m.text()))
 
 const shot = async (name) => win.screenshot({ path: `${out}/${name}.png` })
-const settle = (ms = real ? 30_000 : 4000) => win.waitForSelector('.steps__toggle:not(:has(.shimmer))', { timeout: ms })
+const busy = '.msg .shimmer, .msg .typing, .system-line.is-pending'
+// Waits until nothing is routing or answering, including replies that start later (handoffs).
+async function settle() {
+  const deadline = Date.now() + (real ? 180_000 : 15_000)
+  let quiet = 0
+  while (Date.now() < deadline && quiet < (real ? 6 : 3)) {
+    await win.waitForTimeout(500)
+    quiet = (await win.locator(busy).count()) === 0 ? quiet + 1 : 0
+  }
+}
+async function send(text) {
+  await win.fill('.composer textarea', text)
+  await win.keyboard.press('Enter')
+  await win.waitForTimeout(400)
+}
 
-await shot('01-engenharia')
+await shot('01-inicio')
 
-// Channel without a mention: the hint about @mentions.
-await win.fill('.composer textarea', 'Alguém aí?')
-await win.keyboard.press('Enter')
+// No mention, two agents: the router picks.
+await send('O build do checkout quebrou depois do último merge. Alguém consegue olhar o que pode ser?')
 await win.waitForSelector('.system-line')
-await shot('02-sem-mencao')
-
-// Mention in a channel: Lia answers.
-await win.fill('.composer textarea', '@lia em uma frase: o que é um utility process no Electron?')
-await win.keyboard.press('Enter')
-await win.waitForSelector('.msg .typing, .msg .shimmer')
-await shot('03-streaming')
+await shot('02-router-escolhendo')
 await settle()
-await win.waitForTimeout(300)
-await shot('04-respondeu')
+await shot('03-router-escolheu')
 
-// DM with Theo (Codex).
-await win.click('.section:has-text("Agentes") .nav-item:has-text("Theo")')
-await win.click('text=Abrir DM')
-await win.fill('.composer textarea', 'Em uma frase: média ou mediana pra tempo de resposta?')
-await win.keyboard.press('Enter')
-await win.waitForTimeout(500)
-await settle(real ? 60_000 : 4000)
-await win.waitForTimeout(300)
-await win.click('.receipt__line')
-await shot('05-dm-codex')
+// The agent asks a question with ask_user; the next message answers it.
+await send('@lia antes de sugerir qualquer coisa, use a ferramenta de pergunta pra me perguntar qual é o meu prazo.')
+await settle()
+await shot('04-pergunta')
+await send('Até sexta.')
+await settle()
+await shot('05-respondeu-pergunta')
+
+// Handoff: Lia mentions Theo, who answers next.
+await send('@lia peça pro Theo calcular a mediana de 3, 9 e 4, mencionando ele com arroba. Você não calcula.')
+await settle()
+await shot('06-handoff')
 
 await win.click('text=Uso e limites')
-await shot('06-uso')
-
-await win.click('text=Configurações')
-await shot('07-config')
+await shot('07-uso')
 
 console.log(errors.length ? `ERRORS:\n${errors.join('\n')}` : 'no console errors')
 console.log(`data: ${data}`)

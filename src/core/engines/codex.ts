@@ -1,10 +1,19 @@
+import { GATEWAY_NAME } from './claude'
 import { lastLines, num, parseJson, runCli, type Parser } from './cli'
 import type { Engine, EngineEvent, Turn } from './types'
 
 // Flags that keep the CLI isolated: ignore the user's config, rules, MCP
 // servers and plugins; no saved session; the shell is sandboxed read-only in
-// an empty directory. The prompt comes from stdin ("-").
-export function codexArgs(turn: Pick<Turn, 'model' | 'effort' | 'system' | 'cwd'>): string[] {
+// an empty directory. The prompt comes from stdin ("-"). The app's gateway,
+// when given, is the only MCP server, with its tools approved up front: the
+// gateway decides what runs.
+export function codexArgs(turn: Pick<Turn, 'model' | 'effort' | 'system' | 'cwd' | 'mcpUrl'>): string[] {
+  const gateway = turn.mcpUrl
+    ? [
+        '-c', `mcp_servers.${GATEWAY_NAME}.url=${JSON.stringify(turn.mcpUrl)}`,
+        '-c', `mcp_servers.${GATEWAY_NAME}.default_tools_approval_mode="approve"`
+      ]
+    : []
   return [
     'exec',
     '--json',
@@ -17,6 +26,7 @@ export function codexArgs(turn: Pick<Turn, 'model' | 'effort' | 'system' | 'cwd'
     '-m', turn.model,
     '-c', `model_reasoning_effort=${JSON.stringify(turn.effort)}`,
     '-c', `developer_instructions=${JSON.stringify(turn.system)}`,
+    ...gateway,
     '-'
   ]
 }

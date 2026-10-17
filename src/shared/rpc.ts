@@ -12,6 +12,7 @@ export interface Api {
   snapshot(): Snapshot
   sendMessage(p: { conversationId: string; text: string }): void
   stopRun(p: { messageId: string }): void
+  retryRun(p: { messageId: string }): void
   saveAgent(p: { agent: Agent; channelIds: string[] }): void
   createChannel(p: { name: string }): string
   openDm(p: { agentId: string }): string

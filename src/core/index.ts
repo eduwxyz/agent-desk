@@ -15,6 +15,7 @@ import { codexEngine } from './engines/codex'
 import { adoptLoginShellPath, detectEngines } from './engines/detect'
 import { fakeEngine } from './engines/fake'
 import type { Engine } from './engines/types'
+import { Gateway } from './gateway'
 import { Runner } from './runs'
 import { seed } from './seed'
 
@@ -44,7 +45,8 @@ async function detect(): Promise<void> {
   engines = fake ? { claude: fakeStatus('0.0.0'), codex: fakeStatus('0.0.0') } : await detectEngines()
   emit({ type: 'settings', settings: settings() })
 }
-const ready = (fake ? Promise.resolve() : adoptLoginShellPath()).then(detect)
+const gateway = new Gateway()
+const ready = Promise.all([gateway.start(), (fake ? Promise.resolve() : adoptLoginShellPath()).then(detect)])
 
 const settings = (): Settings => ({ ...db.getSettings(DEFAULTS), engines })
 
@@ -65,7 +67,8 @@ const runner = new Runner({
   engines: engineImpls,
   settings: () => ready.then(settings),
   emit,
-  workDir: join(dataDir, 'agents')
+  workDir: join(dataDir, 'agents'),
+  gateway
 })
 
 function emitConversations(ids?: string[]): void {
@@ -80,6 +83,8 @@ const api: Api = {
   },
 
   stopRun: ({ messageId }) => runner.stop(messageId),
+
+  retryRun: ({ messageId }) => runner.retry(messageId),
 
   saveAgent: ({ agent, channelIds }) => {
     const clean: Agent = { ...agent, name: agent.name.trim(), handle: agent.handle.trim().toLowerCase() }

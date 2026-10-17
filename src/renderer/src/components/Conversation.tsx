@@ -9,6 +9,7 @@ import {
   modelById,
   navigate,
   openDm,
+  retryRun,
   sendMessage,
   stopRun,
   useStore,
@@ -81,7 +82,7 @@ function MessageList({ messages, conversationId }: { messages: Message[]; conver
         <div className="empty">
           <Icon name="spark" size={22} />
           <p>Nada por aqui ainda.</p>
-          <p className="muted">Mencione um agente com @ pra ele responder. Na DM, o agente sempre responde.</p>
+          <p className="muted">Mencione um agente com @ ou escreva e deixe o router decidir quem responde.</p>
         </div>
       </div>
     )
@@ -118,7 +119,7 @@ function MessageRow({ message, grouped }: { message: Message; grouped: boolean }
 
   if (message.author.kind === 'system') {
     return (
-      <div className="system-line">
+      <div className={`system-line ${message.run?.status === 'working' ? 'is-pending' : ''}`}>
         <Icon name="spark" size={13} />
         <Markdown>{message.text}</Markdown>
         <span className="muted">{time(message.at)}</span>
@@ -158,13 +159,29 @@ function MessageRow({ message, grouped }: { message: Message; grouped: boolean }
             <i />
           </div>
         ) : null}
+        {message.run?.question && <QuestionCard question={message.run.question} answered={message.run.status !== 'waiting_input'} />}
         {approval && <ApprovalCard approval={approval} />}
         {message.run?.status === 'stopped' && <div className="note">Interrompido por você.</div>}
         {message.run?.status === 'interrupted' && <div className="note">Interrompido: o app fechou no meio da resposta.</div>}
         {message.run?.error && <div className="note note--error">{message.run.error}</div>}
+        {message.run && ['failed', 'stopped', 'interrupted', 'limit_reached'].includes(message.run.status) && (
+          <button className="btn btn--xs retry" onClick={() => retryRun(message.id)}>
+            Tentar de novo
+          </button>
+        )}
         {message.run?.receipt && <ReceiptLine receipt={message.run.receipt} />}
       </div>
     </article>
+  )
+}
+
+function QuestionCard({ question, answered }: { question: string; answered: boolean }): ReactNode {
+  return (
+    <div className={`question ${answered ? 'is-answered' : ''}`}>
+      <span className="question__label">{answered ? 'Perguntou' : 'Pergunta pra você'}</span>
+      <p>{question}</p>
+      {!answered && <span className="hint">Sua próxima mensagem aqui é a resposta.</span>}
+    </div>
   )
 }
 
@@ -377,7 +394,11 @@ function Composer({ conversationId, members, placeholder }: { conversationId: st
   const ref = useRef<HTMLTextAreaElement>(null)
   const allAgents = useStore((s) => s.agents.filter((a) => !a.archived))
   const isDm = useStore((s) => s.conversations.find((c) => c.id === conversationId)?.kind === 'dm')
-  const working = useStore((s) => s.messages.filter((m) => m.conversationId === conversationId && m.run?.status === 'working'))
+  const working = useStore((s) => s.messages.filter((m) => m.conversationId === conversationId && m.author.kind === 'agent' && m.run?.status === 'working'))
+  const asker = useStore((s) => {
+    const q = s.messages.findLast((m) => m.conversationId === conversationId && m.run?.status === 'waiting_input')
+    return q?.author.kind === 'agent' ? agentById(s, q.author.id)?.name : undefined
+  })
 
   useEffect(() => {
     setText('')
@@ -459,7 +480,7 @@ function Composer({ conversationId, members, placeholder }: { conversationId: st
           ref={ref}
           rows={1}
           value={text}
-          placeholder={placeholder}
+          placeholder={asker ? `Responder a ${asker}` : placeholder}
           onChange={(e) => {
             setText(e.target.value)
             updateMention(e.target.value, e.target.selectionStart)
@@ -479,7 +500,7 @@ function Composer({ conversationId, members, placeholder }: { conversationId: st
         />
         <div className="composer__bar">
           <span className="composer__hint">
-            {isDm ? 'O agente sempre responde na DM' : 'Use @ pra chamar um agente'}
+            {isDm ? 'O agente sempre responde na DM' : '@ chama um agente · sem menção, o router decide'}
           </span>
           {working.length > 0 ? (
             <button className="btn btn--sm" onClick={() => working.forEach((m) => stopRun(m.id))}>

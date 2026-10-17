@@ -7,6 +7,7 @@ export interface Turn {
   prompt: string
   cwd: string // an empty per-agent directory; the CLI gets no project files
   signal: AbortSignal
+  mcpUrl?: string // the app's gateway for this turn: the only tools the CLI gets
 }
 
 export interface Usage {
