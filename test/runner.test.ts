@@ -107,6 +107,14 @@ describe('Runner', () => {
     expect(db.messages().at(-1)?.text).toContain('Ninguém precisa responder')
   })
 
+  it('says so when a channel has nobody in it, instead of ignoring the message', async () => {
+    db.createConversation({ id: 'c2', kind: 'channel', name: 'vazio', members: [] })
+    const r = runner()
+    await r.send('c2', 'alguém?')
+    await r.idle()
+    expect(db.messages().at(-1)).toMatchObject({ author: { kind: 'system' }, text: expect.stringContaining('Ninguém está neste canal') as string })
+  })
+
   it('reports a router failure and asks for a mention', async () => {
     settings.routerModel = 'gpt-5.6-luna'
     settings.engines.codex = { installed: true, loggedIn: false }

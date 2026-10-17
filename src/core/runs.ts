@@ -118,6 +118,10 @@ export class Runner {
       if (asker && responders.length === 0) responders = [asker]
     }
 
+    if (members.length === 0) {
+      this.post(conv.id, 'Ninguém está neste canal ainda. Adicione agentes na página de cada um (Canais) e mande de novo.')
+      return
+    }
     if (responders.length === 0) {
       if (conv.kind === 'dm' || members.length === 1) responders = members
       else if (members.length > 1) {
