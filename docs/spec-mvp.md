@@ -205,6 +205,8 @@ Até aqui tudo começa com uma mensagem minha. Uma rotina faz o agente trabalhar
 - **Governança igual:** mesmo limite de tokens (checado antes), mesmos grants, e ação sensível vira pedido de aprovação, que espera até eu decidir. Se a mesma rotina ainda está rodando, a próxima execução pula.
 - **Aviso:** quando termina, uma notificação do sistema com o agente, o nome da rotina e o começo da resposta (ou "pediu aprovação", "parou no limite", "falhou"). Clicar abre o app.
 - **Rodar agora**, pra testar, sem mexer no horário.
+- **Uma vez:** em vez de repetir, roda no próximo horário que bate com os dias e se desliga sozinha.
+- **O agente agenda:** com a ferramenta `agendar_rotina`, quando eu peço algo pra depois ("daqui a 2 minutos", "toda segunda às 9h"), o agente cria a rotina pra ele mesmo, nesta conversa. Na mensagem aparece "Agendou: …" com **Desfazer**. Ele só mexe nas próprias rotinas (`cancelar_rotina`, ou `agendar_rotina` com `substitui`), vê as que tem no prompt, e pode ter no máximo 10 ligadas. A hora atual vai no fim de cada transcrição, pra ele calcular "daqui a X".
 - **Tela de Rotinas** (sidebar): cada rotina com agente, quando roda, onde posta, próxima execução e a última (status e link pra conversa). Criar, editar, ligar/desligar, rodar agora, apagar.
 - **Pra rodar sem eu lembrar:** fechar a janela não para as rotinas (o app continua aberto no Dock; só Sair para). Em Configurações, **Abrir ao ligar o Mac** (só no app empacotado).
 - Depois: gatilhos por evento (issue no Linear, e-mail, CI quebrado), intervalos ("a cada 2 h") e ícone na barra de menu.
@@ -332,7 +334,7 @@ Até aqui tudo começa com uma mensagem minha. Uma rotina faz o agente trabalhar
 
 5. **M5, computador do agente (feito):** container por agente, ferramentas `bash`, arquivos, serviços, `screenshot` e `show_file`, artefatos e painel lateral. (AC 20, 21) Testado com o Claude Code real: pedi um dashboard de vendas com gráfico, servido e com print; o Sonnet escreveu, subiu o serviço, tirou o print e respondeu em 15 s, sem nenhum pedido de aprovação. Arquivos são lidos e escritos sempre por dentro do container: um symlink em `/work` apontando pro Mac não alcança o Mac. Codex com computador ainda não testado (depende do login próprio).
 
-6. **M6, rotinas (feito):** agendador, tela de Rotinas, mensagem de rotina na conversa, notificação ao terminar, abrir ao ligar o Mac. (AC 22, 23) Testado com o Claude Code real: uma rotina na DM da Lia, disparada por Rodar agora, respondeu em 5 s, sem perguntar se podia; a DM é criada ao salvar se ainda não existir. Horário, atraso, pulo após 12 h, uma execução por vez e limite testados com relógio simulado. Abrir ao ligar o Mac só pode ser conferido no app empacotado.
+6. **M6, rotinas (feito):** agendador, tela de Rotinas, mensagem de rotina na conversa, notificação ao terminar, abrir ao ligar o Mac. (AC 22, 23) Testado com o Claude Code real: uma rotina na DM da Lia, disparada por Rodar agora, respondeu em 5 s, sem perguntar se podia; a DM é criada ao salvar se ainda não existir. Horário, atraso, pulo após 12 h, uma execução por vez e limite testados com relógio simulado. Abrir ao ligar o Mac só pode ser conferido no app empacotado. Depois: "daqui a 1 minuto me manda uma frase" na DM da Lia virou uma rotina de uma vez em 3 s, que disparou sozinha no minuto seguinte.
 
 O MVP termina quando os seis estiverem prontos e eu usar o app por uma semana no dia a dia.
 

@@ -7,6 +7,7 @@ import { describeSchedule, ENGINES, modelInfo, type Agent, type Approval, type C
 import { HISTORY_LIMIT, mentioned, systemPrompt, transcript } from './context'
 import { LEMBRAR, type Memories } from './memory'
 import { COMPUTER_TOOL_NAMES, COMPUTER_TOOLS, stepFor, type Computers } from './computer'
+import { AGENDAR, CANCELAR, ROUTINE_TOOL_NAMES, type Routines } from './routines'
 import type { Db } from './db'
 import type { Engine } from './engines/types'
 import { textResult, type Gateway, type ToolDef } from './gateway'
@@ -41,6 +42,7 @@ export interface RunnerDeps {
   connectors?: Connectors
   memory?: Memories // without it, agents get no memory and see the last HISTORY_LIMIT messages
   computers?: Pick<Computers, 'call'> // without it, no agent has a computer
+  routines?: Pick<Routines, 'schedule' | 'cancel' | 'forAgent'> // without it, agents can't schedule
   notify?: (title: string, body: string, conversationId?: string) => void
 }
 
@@ -316,6 +318,7 @@ export class Runner {
     }
     const canRemember = !!memory && !!this.deps.gateway && agent.memory !== 'read'
     const computers = this.deps.gateway && agent.computer ? this.deps.computers : undefined
+    const routines = this.deps.gateway ? this.deps.routines : undefined
 
     const control: Control = { ctl: new AbortController() }
     this.controllers.set(msg.id, control)
@@ -337,8 +340,9 @@ export class Runner {
     const memoryIds: string[] = []
     const artifactIds: string[] = []
     const services: string[] = []
+    const routineIds: string[] = []
     const exposed = new Map<string, Exposed>()
-    const taken = new Set<string>([ASK_USER.name, LEMBRAR.name, ...COMPUTER_TOOL_NAMES])
+    const taken = new Set<string>([ASK_USER.name, LEMBRAR.name, ...COMPUTER_TOOL_NAMES, ...ROUTINE_TOOL_NAMES])
     for (const c of this.deps.connectors?.list() ?? []) {
       if (c.status !== 'connected') continue
       for (const t of db.tools(c.id)) if (allowed(t, agent.grants[c.id])) exposed.set(exposedName(c, t.name, taken), { connector: c, tool: t })
@@ -347,6 +351,7 @@ export class Runner {
       ASK_USER,
       ...(canRemember ? [LEMBRAR] : []),
       ...(computers ? COMPUTER_TOOLS : []),
+      ...(routines ? [AGENDAR, CANCELAR] : []),
       ...[...exposed].map(([name, { connector, tool }]): ToolDef => {
         const schema = tool.inputSchema as ToolDef['inputSchema']
         if (tool.cls !== 'sensitive') return { name, description: `[${connector.name}] ${tool.description}`, inputSchema: schema }
@@ -389,6 +394,16 @@ export class Runner {
           memoryIds.push(r.memory.id)
           msg.run = { ...msg.run!, memoryIds: [...memoryIds] }
           addSteps({ id: randomUUID(), label: r.label!, detail: r.memory.text, status: 'done' })
+          return textResult(r.reply)
+        }
+
+        if (routines && ROUTINE_TOOL_NAMES.has(name)) {
+          const current = db.agent(agent.id) ?? agent
+          const r = name === AGENDAR.name ? routines.schedule(current, conv, args) : routines.cancel(current, typeof args['id'] === 'string' ? args['id'] : '')
+          if (!r.routine) return textResult(r.reply, r.error)
+          if (name === AGENDAR.name && !routineIds.includes(r.routine.id)) routineIds.push(r.routine.id)
+          msg.run = { ...msg.run!, routineIds: routineIds.length ? [...routineIds] : undefined }
+          addSteps({ id: randomUUID(), label: name === AGENDAR.name ? 'Agendou rotina' : 'Apagou rotina', detail: r.routine.name, status: 'done' })
           return textResult(r.reply)
         }
 
@@ -480,7 +495,7 @@ export class Runner {
       const events = engines[engineId].run({
         model: agent.modelId,
         effort: agent.effort,
-        system: systemPrompt({ agent, settings, conversation: conv, peers, memories: memory?.forPrompt(agent), canRemember, hasComputer: !!computers }),
+        system: systemPrompt({ agent, settings, conversation: conv, peers, memories: memory?.forPrompt(agent), canRemember, hasComputer: !!computers, routines: routines?.forAgent(agent.id) }),
         prompt: transcript({ agent, conversation: conv, messages: history, agents: db.agents(), me: settings.workspaceName, task: opts.task, summary }),
         cwd,
         signal: control.ctl.signal,
@@ -519,7 +534,7 @@ export class Runner {
         : undefined
     if (receipt) db.addReceipt({ ...receipt, messageId: msg.id, agentId: agent.id, engine: engineId, at: Date.now() })
 
-    const base = { depth: opts.depth, receipt, question, approvalId: approval?.id, memoryIds: memoryIds.length ? memoryIds : undefined, artifactIds: artifactIds.length ? artifactIds : undefined, services: services.length ? services : undefined }
+    const base = { depth: opts.depth, receipt, question, approvalId: approval?.id, memoryIds: memoryIds.length ? memoryIds : undefined, artifactIds: artifactIds.length ? artifactIds : undefined, services: services.length ? services : undefined, routineIds: routineIds.length ? routineIds : undefined }
     if (control.reason === 'stopped') {
       save({ run: { ...base, status: 'stopped', steps: closeThinking('error', 'Parado') } })
     } else if (control.reason === 'limit') {

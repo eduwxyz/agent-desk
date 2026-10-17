@@ -6,12 +6,14 @@ import {
   conversationTitle,
   decideApproval,
   decideMemory,
+  describeSchedule,
   editSummary,
   ENGINES,
   forgetMemory,
   modelById,
   navigate,
   openDm,
+  removeRoutine,
   retryRun,
   sendMessage,
   stopRun,
@@ -27,6 +29,7 @@ import {
 } from '../store'
 import { AgentAvatar, Icon, MeAvatar, duration, time, tokens, usd } from './ui'
 import { ArtifactCard, ServiceCard, SidePanel } from './Panel'
+import { when } from './Routines'
 
 export function ConversationView({ id }: { id: string }): ReactNode {
   const conv = useStore((s) => s.conversations.find((c) => c.id === id))
@@ -182,6 +185,7 @@ function MessageRow({ message, grouped }: { message: Message; grouped: boolean }
         {message.run?.question && <QuestionCard question={message.run.question} answered={message.run.status !== 'waiting_input'} />}
         {approval && <ApprovalCard approval={approval} />}
         {message.run?.memoryIds?.map((mid) => <MemoryChip key={mid} id={mid} />)}
+        {message.run?.routineIds?.map((rid) => <RoutineChip key={rid} id={rid} />)}
         {message.run?.artifactIds && (
           <div className="artifacts">
             {message.run.artifactIds.map((aid) => (
@@ -317,6 +321,29 @@ function MemoryChip({ id }: { id: string }): ReactNode {
           </button>
         </>
       )}
+    </div>
+  )
+}
+
+// A routine the agent scheduled in this reply.
+function RoutineChip({ id }: { id: string }): ReactNode {
+  const r = useStore((s) => s.routines.find((x) => x.id === id))
+  if (!r) return null // deleted
+  const state = r.enabled && r.nextAt ? `próxima ${when(r.nextAt)}` : r.schedule.once && r.lastAt ? 'já rodou' : 'desligada'
+  return (
+    <div className="memory-chip routine-chip">
+      <Icon name="clock" size={13} />
+      <span className="memory-chip__label">Agendou:</span>
+      <span className="memory-chip__text">{r.name}</span>
+      <span className="muted small">
+        {describeSchedule(r.schedule)} · {state}
+      </span>
+      <button className="link" onClick={() => navigate({ kind: 'routines' })}>
+        Ver
+      </button>
+      <button className="link" onClick={() => removeRoutine(id)}>
+        Desfazer
+      </button>
     </div>
   )
 }

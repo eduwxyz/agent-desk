@@ -8,7 +8,7 @@ import { Db } from '../src/core/db'
 import { fakeEngine } from '../src/core/engines/fake'
 import type { Engine, Turn } from '../src/core/engines/types'
 import { Gateway } from '../src/core/gateway'
-import { LATE_GRACE_MS, outcome, Routines } from '../src/core/routines'
+import { LATE_GRACE_MS, MAX_AGENT_ROUTINES, outcome, Routines } from '../src/core/routines'
 import { Runner } from '../src/core/runs'
 
 const at = (y: number, mo: number, d: number, h = 0, mi = 0): number => new Date(y, mo - 1, d, h, mi).getTime()
@@ -29,6 +29,8 @@ describe('schedule', () => {
     expect(describeSchedule({ days: WEEKDAYS, time: '09:00' })).toBe('Seg a sex às 9h')
     expect(describeSchedule({ days: [5], time: '17:00' })).toBe('Toda sexta às 17h')
     expect(describeSchedule({ days: [1, 3, 5], time: '07:15' })).toBe('Seg, qua e sex às 7:15')
+    expect(describeSchedule({ days: [0, 1, 2, 3, 4, 5, 6], time: '13:15', once: true })).toBe('Uma vez, às 13:15')
+    expect(describeSchedule({ days: [5], time: '17:00', once: true })).toBe('Uma vez, sexta às 17h')
   })
 })
 
@@ -62,8 +64,14 @@ describe('routines', () => {
     const emit = (_: CoreEvent): void => {}
     gateway = new Gateway()
     await gateway.start()
-    runner = new Runner({ db, engines, settings: async () => settings, emit, workDir: mkdtempSync(join(tmpdir(), 'ad-w-')), gateway })
-    routines = new Routines({ db, runner, emit, now: () => clock, notify: (title, body, conversationId) => notes.push({ title, body, conversationId }) })
+    routines = new Routines({
+      db,
+      runner: { runRoutine: (r, when) => runner.runRoutine(r, when) },
+      emit,
+      now: () => clock,
+      notify: (title, body, conversationId) => notes.push({ title, body, conversationId })
+    })
+    runner = new Runner({ db, engines, settings: async () => settings, emit, workDir: mkdtempSync(join(tmpdir(), 'ad-w-')), gateway, routines })
   })
 
   afterEach(async () => {
@@ -167,5 +175,55 @@ describe('routines', () => {
     const base = { id: 'm', conversationId: 'c1', author: { kind: 'agent' as const, id: 'a1' }, at: 0 }
     expect(outcome({ ...base, text: '## Resumo\n\n**3 issues** vencidas: [ENG-1](https://x.y/1)', run: { status: 'done', steps: [] } })).toBe('Resumo 3 issues vencidas: ENG-1')
     expect(outcome({ ...base, text: '', run: { status: 'waiting_approval', steps: [] } })).toBe('Pediu aprovação pra continuar.')
+  })
+
+  it('a one-off routine runs once and turns itself off', async () => {
+    const r = create({ schedule: { days: [0, 1, 2, 3, 4, 5, 6], time: '09:30', once: true } })
+    clock = at(2026, 10, 19, 9, 30) + 5_000
+    routines.tick()
+    await settle()
+    expect(db.routine(r.id)).toMatchObject({ enabled: false, nextAt: undefined })
+    clock = at(2026, 10, 20, 9, 30) + 5_000
+    routines.tick()
+    await settle()
+    expect(posted().filter((m) => m.author.kind === 'routine')).toHaveLength(1)
+  })
+
+  it('an agent schedules a routine for itself when asked, and it runs on its own', async () => {
+    await runner.send('d1', 'agende `Teste` às 09:30 uma vez: diga oi')
+    await runner.idle()
+    const reply = posted('d1').find((m) => m.author.kind === 'agent')!
+    const [r] = db.routines()
+    expect(r).toMatchObject({ name: 'Teste', agentId: 'a1', conversationId: 'd1', prompt: 'diga oi', createdBy: 'a1', schedule: { once: true }, nextAt: at(2026, 10, 19, 9, 30) })
+    expect(reply.run?.routineIds).toEqual([r!.id])
+    expect(reply.run?.steps.map((s) => s.label)).toContain('Agendou rotina')
+    expect(reply.text).toContain('Próxima vez: seg, 19/10')
+
+    clock = at(2026, 10, 19, 9, 30) + 5_000
+    routines.tick()
+    await settle()
+    expect(posted('d1').filter((m) => m.author.kind === 'routine').map((m) => m.text)).toEqual(['diga oi'])
+    expect(db.routine(r!.id)!.enabled).toBe(false)
+
+    await runner.send('d1', 'oi de novo') // its next turn sees the time and only its active routines
+    await runner.idle()
+    expect(turns.at(-1)!.prompt).toMatch(/Agora: .+\./)
+    expect(turns.at(-1)!.system).not.toContain('## Suas rotinas')
+  })
+
+  it("an agent only touches its own routines, and only up to a limit", () => {
+    const lia = db.agent('a1')!
+    const theo = db.agent('a2')!
+    const dm = db.conversation('d1')!
+    const ask = { nome: 'x', pedido: 'y', horario: '9:00' }
+    const mine = routines.schedule(lia, dm, ask)
+    expect(mine.routine?.schedule).toEqual({ days: [0, 1, 2, 3, 4, 5, 6], time: '09:00' })
+    expect(routines.schedule(theo, dm, { ...ask, substitui: mine.routine!.id }).error).toBe(true)
+    expect(routines.cancel(theo, mine.routine!.id).error).toBe(true)
+    expect(routines.schedule(lia, dm, { ...ask, dias: ['sex', 'sábado'], substitui: mine.routine!.id }).routine?.schedule.days).toEqual([5, 6])
+    for (let i = 1; i < MAX_AGENT_ROUTINES; i++) routines.schedule(lia, dm, ask)
+    expect(routines.schedule(lia, dm, ask)).toMatchObject({ error: true, reply: expect.stringContaining('Cancele') as string })
+    expect(routines.cancel(lia, mine.routine!.id).reply).toContain('apagada')
+    expect(db.routines()).toHaveLength(MAX_AGENT_ROUTINES - 1)
   })
 })

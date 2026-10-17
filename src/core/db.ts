@@ -163,6 +163,10 @@ const MIGRATIONS = [
     created_at INTEGER NOT NULL
   );
   ALTER TABLE messages ADD COLUMN routine TEXT;
+  `,
+  `
+  ALTER TABLE routines ADD COLUMN once INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE routines ADD COLUMN created_by TEXT;
   `
 ]
 
@@ -674,11 +678,12 @@ export class Db {
       agentId: str(r['agent_id']),
       conversationId: str(r['conversation_id']),
       prompt: str(r['prompt']),
-      schedule: { days: JSON.parse(str(r['days']) || '[]') as number[], time: str(r['time']) },
+      schedule: { days: JSON.parse(str(r['days']) || '[]') as number[], time: str(r['time']), ...(r['once'] === 1 ? { once: true } : {}) },
       enabled: r['enabled'] === 1,
       nextAt: r['next_at'] == null ? undefined : Number(r['next_at']),
       lastAt: r['last_at'] == null ? undefined : Number(r['last_at']),
       lastMessageId: r['last_message_id'] ? str(r['last_message_id']) : undefined,
+      createdBy: r['created_by'] ? str(r['created_by']) : undefined,
       createdAt: Number(r['created_at'])
     }))
   }
@@ -690,12 +695,28 @@ export class Db {
   saveRoutine(r: Routine): void {
     this.db
       .prepare(
-        `INSERT INTO routines (id, name, agent_id, conversation_id, prompt, days, time, enabled, next_at, last_at, last_message_id, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `INSERT INTO routines (id, name, agent_id, conversation_id, prompt, days, time, once, enabled, next_at, last_at, last_message_id, created_by, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT (id) DO UPDATE SET name = excluded.name, agent_id = excluded.agent_id, conversation_id = excluded.conversation_id, prompt = excluded.prompt,
-           days = excluded.days, time = excluded.time, enabled = excluded.enabled, next_at = excluded.next_at, last_at = excluded.last_at, last_message_id = excluded.last_message_id`
+           days = excluded.days, time = excluded.time, once = excluded.once, enabled = excluded.enabled, next_at = excluded.next_at, last_at = excluded.last_at,
+           last_message_id = excluded.last_message_id`
       )
-      .run(r.id, r.name, r.agentId, r.conversationId, r.prompt, JSON.stringify(r.schedule.days), r.schedule.time, r.enabled ? 1 : 0, r.nextAt ?? null, r.lastAt ?? null, r.lastMessageId ?? null, r.createdAt)
+      .run(
+        r.id,
+        r.name,
+        r.agentId,
+        r.conversationId,
+        r.prompt,
+        JSON.stringify(r.schedule.days),
+        r.schedule.time,
+        r.schedule.once ? 1 : 0,
+        r.enabled ? 1 : 0,
+        r.nextAt ?? null,
+        r.lastAt ?? null,
+        r.lastMessageId ?? null,
+        r.createdBy ?? null,
+        r.createdAt
+      )
   }
 
   removeRoutine(id: string): void {

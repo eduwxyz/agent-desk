@@ -1945,3 +1945,6 @@ table.csv th {
   border-color: var(--accent);
   color: var(--accent-text);
 }
+.routine-once {
+  margin-bottom: 8px;
+}

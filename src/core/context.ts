@@ -1,7 +1,7 @@
 // Builds what a turn sends to the engine: a system prompt (stable per agent)
 // and a prompt with the conversation transcript. The CLI keeps no session
 // between turns, so everything the agent knows comes from here.
-import type { Agent, Conversation, Memory, Message, Settings } from '../shared/types'
+import { describeSchedule, type Agent, type Conversation, type Memory, type Message, type Routine, type Settings } from '../shared/types'
 
 export const HISTORY_LIMIT = 30
 
@@ -13,8 +13,9 @@ export function systemPrompt(opts: {
   memories?: { aboutMe: Memory[]; own: Memory[] }
   canRemember?: boolean
   hasComputer?: boolean
+  routines?: Routine[] // its own, when it can schedule
 }): string {
-  const { agent, settings, conversation, peers, memories, canRemember, hasComputer } = opts
+  const { agent, settings, conversation, peers, memories, canRemember, hasComputer, routines } = opts
   const me = settings.workspaceName || 'o usuário'
   const where =
     conversation.kind === 'dm'
@@ -32,6 +33,7 @@ export function systemPrompt(opts: {
         `Você tem um computador Linux só seu (Debian, você é root, com internet), que continua existindo entre conversas. A pasta de trabalho é /work. Use as ferramentas bash, read_file, write_file e edit_file pra instalar, criar, rodar e testar o que precisar: nada lá dentro pede permissão, então faça em vez de descrever. Pra servidor web, API ou dashboard, use start_service e confira com screenshot. Pra mostrar o resultado a ${me}, use show_file (documento, imagem, planilha) ou screenshot. Esse computador não é o de ${me}: os arquivos de ${me} não estão nele.`
       ].join('\n'),
     memories && (memories.aboutMe.length > 0 || memories.own.length > 0) && memorySection(me, memories),
+    routines && routines.length > 0 && `## Suas rotinas\nPedidos agendados que você roda sozinho. Pra mudar ou apagar, use agendar_rotina com substitui, ou cancelar_rotina.\n${routines.map((r) => `- [${r.id}] ${r.name}: ${describeSchedule(r.schedule).toLowerCase()} · ${r.prompt.replace(/\s+/g, ' ').slice(0, 160)}`).join('\n')}`,
     [
       '## Como responder',
       `- ${where}`,
@@ -42,6 +44,8 @@ export function systemPrompt(opts: {
       `- Se precisar de uma informação de ${me} pra continuar, use a ferramenta ask_user com uma pergunta curta e encerre a resposta. A resposta chega na próxima mensagem.`,
       canRemember &&
         `- Quando aprender algo que vai continuar valendo em outras conversas (uma preferência de ${me}, um jeito de trabalhar, um fato durável do projeto), guarde com a ferramenta lembrar, uma ideia por vez. Se algo lembrado mudou, use substitui com o id. Não guarde o que só importa nesta conversa.`,
+      routines &&
+        `- Quando ${me} pedir algo pra depois ou pra repetir ("daqui a 10 minutos", "toda segunda às 9h"), agende com agendar_rotina em vez de prometer lembrar: fora de uma rotina, você só roda quando alguém escreve. A hora atual está no fim da conversa.`,
       `- Suas outras ferramentas são as que ${me} liberou pra você. Ações sensíveis não rodam na hora: viram um pedido de aprovação, e você recebe o resultado depois da decisão.`,
       hasComputer
         ? '- Não diga que fez algo que nenhuma ferramenta sua fez.'
@@ -65,6 +69,8 @@ function memorySection(me: string, m: { aboutMe: Memory[]; own: Memory[] }): str
     .filter(Boolean)
     .join('\n\n')
 }
+
+const now = (): string => new Date().toLocaleString('pt-BR', { weekday: 'long', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
 
 const clock = (at: number): string => new Date(at).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
 
@@ -93,6 +99,7 @@ export function transcript(opts: { agent: Agent; conversation: Conversation; mes
     summary?.trim() && `Resumo do que veio antes em ${where}:\n${summary.trim()}`,
     `${summary?.trim() ? 'Mensagens desde o resumo' : `Conversa em ${where}`}, das mais antigas pras mais novas:`,
     ...lines,
+    `Agora: ${now()}.`,
     task ?? `Responda à última mensagem como ${agent.name}.`
   ]
     .filter(Boolean)

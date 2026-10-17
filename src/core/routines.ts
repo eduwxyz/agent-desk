@@ -3,12 +3,51 @@
 // it also catches up after the Mac wakes or the app opens again.
 import { randomUUID } from 'node:crypto'
 import type { CoreEvent } from '../shared/rpc'
-import { nextRun, validTime, type Message, type Routine, type RoutineInput } from '../shared/types'
+import { describeSchedule, nextRun, validTime, type Agent, type Conversation, type Message, type Routine, type RoutineInput } from '../shared/types'
 import type { Db } from './db'
+import type { ToolDef } from './gateway'
 
 export const TICK_MS = 30_000
 export const LATE_GRACE_MS = 12 * 3_600_000 // a run missed by more than this is skipped
 const LATE_AFTER_MS = 2 * 60_000 // later than this is "atrasada" in the conversation
+export const MAX_AGENT_ROUTINES = 10 // active ones per agent, so an agent can't schedule itself without end
+
+const DAY_KEYS = ['dom', 'seg', 'ter', 'qua', 'qui', 'sex', 'sab']
+
+export const AGENDAR: ToolDef = {
+  name: 'agendar_rotina',
+  description:
+    'Agenda uma rotina pra você mesmo: no horário, o app posta o pedido nesta conversa e você roda sozinho, sem ninguém pedir. Use quando pedirem algo pra depois ("daqui a 10 minutos", "toda segunda às 9h", "amanhã cedo"). Também muda uma rotina sua, com substitui.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      nome: { type: 'string', description: 'Nome curto (ex.: "Issues do Linear").' },
+      pedido: {
+        type: 'string',
+        description: 'O que fazer quando rodar, escrito como um pedido completo pra você mesmo. Inclua o contexto que precisar: quando rodar, você vê só as mensagens recentes desta conversa.'
+      },
+      horario: { type: 'string', description: 'HH:MM, 24 h, no horário local (o mesmo das mensagens).' },
+      dias: { type: 'array', items: { type: 'string', enum: DAY_KEYS }, description: 'Dias da semana em que roda. Sem dias: todos.' },
+      uma_vez: { type: 'boolean', description: 'true pra rodar uma vez só (no próximo horário que bate com os dias) e depois desligar.' },
+      substitui: { type: 'string', description: 'Id de uma rotina sua que esta muda.' }
+    },
+    required: ['nome', 'pedido', 'horario']
+  }
+}
+
+export const CANCELAR: ToolDef = {
+  name: 'cancelar_rotina',
+  description: 'Apaga uma rotina sua.',
+  inputSchema: { type: 'object', properties: { id: { type: 'string', description: 'O id da rotina.' } }, required: ['id'] }
+}
+
+export const ROUTINE_TOOL_NAMES = new Set([AGENDAR.name, CANCELAR.name])
+
+// "sáb, 18/10, 13:15"
+export const whenText = (at: number): string =>
+  new Date(at).toLocaleString('pt-BR', { weekday: 'short', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }).replace('.', '')
+
+type ToolOutcome = { routine?: Routine; reply: string; error?: boolean }
 
 export interface RoutineDeps {
   db: Db
@@ -46,7 +85,7 @@ export class Routines {
     for (const r of this.deps.db.routines()) {
       if (!r.enabled || r.nextAt === undefined || r.nextAt > now) continue
       const scheduledAt = r.nextAt
-      this.store({ ...r, nextAt: nextRun(r.schedule, now) })
+      this.store(r.schedule.once ? { ...r, enabled: false, nextAt: undefined } : { ...r, nextAt: nextRun(r.schedule, now) })
       if (now - scheduledAt > LATE_GRACE_MS) continue
       this.fire(r.id, { scheduledAt, late: now - scheduledAt > LATE_AFTER_MS })
     }
@@ -67,7 +106,7 @@ export class Routines {
     if (!validTime(input.schedule.time)) throw new Error('Horário inválido.')
 
     const prev = input.id ? db.routine(input.id) : undefined
-    const schedule = { days, time: input.schedule.time }
+    const schedule = { days, time: input.schedule.time, ...(input.schedule.once ? { once: true } : {}) }
     const r: Routine = {
       ...prev,
       id: prev?.id ?? randomUUID(),
@@ -78,10 +117,56 @@ export class Routines {
       schedule,
       enabled: input.enabled,
       nextAt: input.enabled ? nextRun(schedule, this.now()) : undefined,
+      createdBy: prev ? prev.createdBy : input.createdBy,
       createdAt: prev?.createdAt ?? this.now()
     }
     this.store(r)
     return r
+  }
+
+  // The agent's own routines, for its prompt.
+  forAgent(agentId: string): Routine[] {
+    return this.deps.db.routines().filter((r) => r.agentId === agentId && r.enabled)
+  }
+
+  // `agendar_rotina`: an agent schedules (or changes) a routine for itself, posted where it was asked.
+  schedule(agent: Agent, conv: Conversation, args: Record<string, unknown>): ToolOutcome {
+    const text = (k: string): string => (typeof args[k] === 'string' ? (args[k] as string).trim() : '')
+    const fail = (reply: string): ToolOutcome => ({ reply, error: true })
+    const replaces = text('substitui')
+    const prev = replaces ? this.deps.db.routine(replaces) : undefined
+    if (replaces && prev?.agentId !== agent.id) return fail(`Não achei uma rotina sua com id ${replaces}.`)
+    if (!prev && this.forAgent(agent.id).length >= MAX_AGENT_ROUTINES) return fail(`Você já tem ${MAX_AGENT_ROUTINES} rotinas ligadas. Cancele uma antes.`)
+
+    const keys = Array.isArray(args['dias']) ? (args['dias'] as unknown[]).map((d) => DAY_KEYS.indexOf(String(d).slice(0, 3).toLowerCase().normalize('NFD').replace(/[^a-z]/g, ''))) : []
+    if (keys.includes(-1)) return fail(`Dias inválidos: use ${DAY_KEYS.join(', ')}.`)
+    const time = text('horario').padStart(5, '0')
+    try {
+      const routine = this.save({
+        id: prev?.id,
+        name: text('nome'),
+        prompt: text('pedido'),
+        agentId: agent.id,
+        conversationId: prev?.conversationId ?? conv.id,
+        schedule: { days: keys.length ? keys : [0, 1, 2, 3, 4, 5, 6], time, once: args['uma_vez'] === true },
+        enabled: true,
+        createdBy: agent.id
+      })
+      return {
+        routine,
+        reply: `Rotina ${prev ? 'atualizada' : 'agendada'} (id ${routine.id}): ${describeSchedule(routine.schedule).toLowerCase()}. Próxima vez: ${whenText(routine.nextAt!)}. Ela aparece na tela de Rotinas, onde dá pra mudar ou apagar.`
+      }
+    } catch (e) {
+      return fail(e instanceof Error ? e.message : String(e))
+    }
+  }
+
+  // `cancelar_rotina`
+  cancel(agent: Agent, id: string): ToolOutcome {
+    const r = this.deps.db.routine(id)
+    if (r?.agentId !== agent.id) return { reply: `Não achei uma rotina sua com id ${id}.`, error: true }
+    this.remove(id)
+    return { routine: r, reply: `Rotina "${r.name}" apagada.` }
   }
 
   remove(id: string): void {

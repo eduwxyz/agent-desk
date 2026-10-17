@@ -117,6 +117,14 @@ const memory = new Memories({ db, engines: engineImpls, settings: () => ready.th
 
 const computers = new Computers({ db, dataDir, emit, shoot })
 
+// The runner runs routines, and agents schedule routines through the runner's tools.
+const routines = new Routines({
+  db,
+  runner: { runRoutine: (r, when) => runner.runRoutine(r, when) },
+  emit,
+  notify: (title, body, conversationId) => toMain({ type: 'notify', title, body, conversationId })
+})
+
 const runner = new Runner({
   db,
   engines: engineImpls,
@@ -127,10 +135,10 @@ const runner = new Runner({
   connectors,
   memory,
   computers,
+  routines,
   notify: (title, body, conversationId) => toMain({ type: 'notify', title, body, conversationId })
 })
 
-const routines = new Routines({ db, runner, emit, notify: (title, body, conversationId) => toMain({ type: 'notify', title, body, conversationId }) })
 
 void ready.then(async () => {
   connectors.connectAll()

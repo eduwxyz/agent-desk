@@ -40,7 +40,7 @@ const LAST: Partial<Record<RunStatus, { label: string; tone: string }>> = {
 }
 
 // "hoje 9:00", "amanhã 9:00", "seg, 20/10 9:00"
-function when(at: number): string {
+export function when(at: number): string {
   const d = new Date(at)
   const hm = d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
   const day = (n: number): string => new Date(Date.now() + n * 86_400_000).toDateString()
@@ -120,6 +120,7 @@ function RoutineRow({ routine: r, editing, onEdit }: { routine: Routine; editing
   const agent = useStore((s) => agentById(s, r.agentId))
   const conv = useStore((s) => s.conversations.find((c) => c.id === r.conversationId))
   const reply = useStore((s) => lastRun(s.messages, r))
+  const creator = useStore((s) => (r.createdBy ? agentById(s, r.createdBy) : undefined))
   const [confirm, setConfirm] = useState(false)
   const status = reply?.run ? LAST[reply.run.status] : undefined
   const where = conv?.kind === 'channel' ? `#${conv.name}` : 'na DM'
@@ -140,7 +141,8 @@ function RoutineRow({ routine: r, editing, onEdit }: { routine: Routine; editing
               <AgentAvatar agent={agent} size={16} /> {agent.name}
             </button>
           )}
-          <span>· {r.enabled && r.nextAt ? `próxima ${when(r.nextAt)}` : 'desligada'}</span>
+          <span>· {r.enabled && r.nextAt ? `próxima ${when(r.nextAt)}` : r.schedule.once && r.lastAt ? 'já rodou' : 'desligada'}</span>
+          {creator && <span>· agendada por {creator.name}</span>}
           {reply && (
             <>
               <span>· última {when(reply.at)}</span>
@@ -231,7 +233,21 @@ function RoutineForm({ draft, onChange, onClose }: { draft: Draft; onChange: (d:
           <textarea rows={4} value={draft.prompt} placeholder="Ex.: Me dá um resumo do que está aberto no Linear pra mim." onChange={(e) => set({ prompt: e.target.value })} />
         </Field>
         <div className="grid2">
-          <Field label="Dias">
+          <Field label="Quando">
+            <div className="segmented routine-once" role="radiogroup" aria-label="Repetição">
+              {[false, true].map((v) => (
+                <button
+                  key={String(v)}
+                  type="button"
+                  role="radio"
+                  aria-checked={!!draft.schedule.once === v}
+                  className={!!draft.schedule.once === v ? 'is-active' : ''}
+                  onClick={() => set({ schedule: { ...draft.schedule, once: v || undefined, days: v ? EVERY_DAY : draft.schedule.days } })}
+                >
+                  {v ? 'Uma vez' : 'Repete'}
+                </button>
+              ))}
+            </div>
             <div className="row row--center routine-days">
               <div className="days" role="group" aria-label="Dias da semana">
                 {DAYS.map((label, d) => (
@@ -248,7 +264,7 @@ function RoutineForm({ draft, onChange, onClose }: { draft: Draft; onChange: (d:
               </button>
             </div>
           </Field>
-          <Field label="Horário" hint="Hora do seu Mac.">
+          <Field label="Horário" hint={draft.schedule.once ? 'No próximo dia marcado em que esse horário ainda não passou.' : 'Hora do seu Mac.'}>
             <input type="time" value={draft.schedule.time} onChange={(e) => set({ schedule: { ...draft.schedule, time: e.target.value } })} />
           </Field>
         </div>
@@ -263,7 +279,10 @@ function RoutineForm({ draft, onChange, onClose }: { draft: Draft; onChange: (d:
           </select>
         </Field>
         <div className="row row--between">
-          <span className="hint">{days.length > 0 ? `${describeSchedule(draft.schedule)}.` : 'Escolha pelo menos um dia.'} Se o app estiver fechado no horário, roda quando abrir (até 12 h depois).</span>
+          <span className="hint">
+            {days.length > 0 ? `${describeSchedule(draft.schedule)}.` : 'Escolha pelo menos um dia.'}
+            {draft.schedule.once ? ' Depois de rodar, desliga sozinha.' : ''} Se o app estiver fechado no horário, roda quando abrir (até 12 h depois).
+          </span>
           <div className="row">
             {error && <span className="field__error">{error}</span>}
             <button className="btn btn--sm btn--ghost" onClick={onClose}>

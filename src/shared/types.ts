@@ -83,6 +83,7 @@ export interface Run {
   memoryIds?: string[] // memories saved or proposed with `lembrar` in this reply
   artifactIds?: string[] // files and screenshots shown in this reply
   services?: string[] // services started in this reply, by name, on the author's computer
+  routineIds?: string[] // routines scheduled or changed with `agendar_rotina` in this reply
 }
 
 export type Author = { kind: 'me' } | { kind: 'agent'; id: string } | { kind: 'system' } | { kind: 'routine'; id: string }
@@ -259,6 +260,7 @@ export const artifactUrl = (a: Pick<Artifact, 'id' | 'name'>): string => `agentd
 export interface Schedule {
   days: number[] // 0 = Sunday … 6 = Saturday
   time: string // "HH:MM", Mac local time
+  once?: boolean // runs at the next matching time, then turns itself off
 }
 
 export interface Routine {
@@ -272,10 +274,11 @@ export interface Routine {
   nextAt?: number // undefined while off
   lastAt?: number
   lastMessageId?: string // the agent's reply in the last run
+  createdBy?: string // the agent that scheduled it with `agendar_rotina`; undefined when I did
   createdAt: number
 }
 
-export type RoutineInput = Pick<Routine, 'name' | 'agentId' | 'conversationId' | 'prompt' | 'schedule' | 'enabled'> & { id?: string }
+export type RoutineInput = Pick<Routine, 'name' | 'agentId' | 'conversationId' | 'prompt' | 'schedule' | 'enabled'> & { id?: string; createdBy?: string }
 
 // What the routine's message in the conversation remembers about that run.
 export interface RoutineRun {
@@ -284,6 +287,7 @@ export interface RoutineRun {
   late: boolean // ran after the app came back, not at the time
 }
 
+const DAY_LONG = ['domingo', 'segunda', 'terça', 'quarta', 'quinta', 'sexta', 'sábado']
 const DAY_SHORT = ['dom', 'seg', 'ter', 'qua', 'qui', 'sex', 'sáb']
 const EVERY_DAY = ['Todo domingo', 'Toda segunda', 'Toda terça', 'Toda quarta', 'Toda quinta', 'Toda sexta', 'Todo sábado']
 
@@ -314,5 +318,6 @@ export function describeSchedule(s: Schedule): string {
           : days.length === 1
             ? EVERY_DAY[days[0]!]
             : days.map((d) => DAY_SHORT[d]).join(', ').replace(/, ([^,]+)$/, ' e $1').replace(/^./, (c) => c.toUpperCase())
+  if (s.once) return days.length === 7 ? `Uma vez, às ${hour}` : `Uma vez, ${days.map((d) => DAY_LONG[d]).join(' ou ')} às ${hour}`
   return `${when} às ${hour}`
 }
