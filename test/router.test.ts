@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { parseRoute, routerPrompt } from '../src/core/router'
-import type { Agent, Message } from '../src/shared/types'
+import type { Agent, Connector, Message } from '../src/shared/types'
 
 const agent = (id: string, handle: string, role: string, instructions = ''): Agent => ({
   id,
@@ -55,5 +55,14 @@ describe('routerPrompt', () => {
     expect(p).toContain('[Edu] o build quebrou')
     expect(p).toContain('[Lia] olhando')
     expect(p).not.toContain('Chamei')
+  })
+
+  it('says which connectors each agent can use', () => {
+    const linear = { id: 'k1', name: 'Linear' } as Connector
+    const demo = { id: 'k2', name: 'Demo' } as Connector
+    const withAccess = { ...lia, grants: { k1: 'read', k2: 'read_write' } } as Agent
+    const p = routerPrompt({ messages: [], agents: [withAccess, { ...nina, grants: { k1: 'none' } }], me: 'Edu', connectors: [linear, demo] })
+    expect(p).toContain('- lia (Lia, Engenharia): Ajuda com código e bugs. · acessa: Linear (só leitura), Demo (leitura e escrita)')
+    expect(p).toContain('- nina (Nina, Conteúdo) · acessa: nenhum sistema externo')
   })
 })

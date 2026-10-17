@@ -180,7 +180,7 @@ export class Runner {
 
       const cwd = join(this.deps.workDir, '_router')
       mkdirSync(cwd, { recursive: true })
-      const r = await route({ engine: engines[model.engine], model: model.id, messages: db.recentMessages(conv.id, 20), agents: members, me: settings.workspaceName, cwd })
+      const r = await route({ engine: engines[model.engine], model: model.id, messages: db.recentMessages(conv.id, 20), agents: members, me: settings.workspaceName, connectors: this.deps.connectors?.list(), cwd })
       if (r.usage) db.addReceipt({ ...r.usage, model: model.id, ms: r.ms, messageId: note.id, agentId: 'router', engine: model.engine, at: Date.now() })
       if ('error' in r) return fail(r.error)
 

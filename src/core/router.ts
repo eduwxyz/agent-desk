@@ -1,6 +1,8 @@
 // The router picks who answers a channel message nobody was mentioned in. It
-// only chooses speakers: it grants nothing and never sees tools.
-import type { Agent, Message } from '../shared/types'
+// only chooses speakers: it grants nothing and never sees tools, just which
+// connectors each agent may use, so a question about Linear goes to whoever
+// can read Linear.
+import type { Agent, Connector, Message } from '../shared/types'
 import type { Engine, Usage } from './engines/types'
 
 export const ROUTER_HISTORY = 10
@@ -11,14 +13,21 @@ export const ROUTER_SYSTEM = [
   'Responda SOMENTE com JSON, sem texto em volta, no formato {"handles": ["..."], "reason": "..."}:',
   `- "handles": de 0 a ${MAX_ROUTED} handles, só da lista de agentes; prefira 1.`,
   '- "reason": um motivo de até 12 palavras, em português.',
+  'Se a mensagem depende de um sistema externo (ex.: Linear, GitHub), prefira quem tem acesso a ele; se ninguém tem, escolha pelo papel.',
   'Lista vazia quando ninguém precisa responder: cumprimento solto, agradecimento, recado, conversa já encerrada.'
 ].join('\n')
 
-export function routerPrompt(opts: { messages: Message[]; agents: Agent[]; me: string }): string {
-  const { messages, agents, me } = opts
+const GRANT_LABEL = { read: 'só leitura', read_write: 'leitura e escrita' } as const
+
+export function routerPrompt(opts: { messages: Message[]; agents: Agent[]; me: string; connectors?: Connector[] }): string {
+  const { messages, agents, me, connectors = [] } = opts
   const roster = agents.map((a) => {
     const about = a.instructions.split('\n')[0]?.slice(0, 140)
-    return `- ${a.handle} (${a.name}${a.role ? `, ${a.role}` : ''})${about ? `: ${about}` : ''}`
+    const access = connectors.flatMap((c) => {
+      const g = a.grants[c.id]
+      return g === 'read' || g === 'read_write' ? [`${c.name} (${GRANT_LABEL[g]})`] : []
+    })
+    return `- ${a.handle} (${a.name}${a.role ? `, ${a.role}` : ''})${about ? `: ${about}` : ''} · acessa: ${access.join(', ') || 'nenhum sistema externo'}`
   })
   const lines = messages
     .filter((m) => m.text.trim() && m.author.kind !== 'system')
@@ -58,6 +67,7 @@ export async function route(opts: {
   messages: Message[]
   agents: Agent[]
   me: string
+  connectors?: Connector[]
   cwd: string
 }): Promise<{ agents: Agent[]; reason: string; usage?: Usage; ms: number } | { error: string; usage?: Usage; ms: number }> {
   const started = Date.now()
