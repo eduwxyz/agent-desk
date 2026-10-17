@@ -5,6 +5,7 @@ export type GrantLevel = 'none' | 'read' | 'read_write'
 export type ToolClass = 'read' | 'write' | 'sensitive'
 export type EngineId = 'claude' | 'codex'
 export type Effort = 'low' | 'medium' | 'high' | 'xhigh'
+export type MemoryMode = 'auto' | 'approve' | 'read' // how an agent's `lembrar` calls land
 
 export interface Model {
   id: string // the value passed to the CLI's --model
@@ -34,6 +35,7 @@ export interface Agent {
   limit: number // tokens per month
   used: number // tokens used this month, computed from receipts
   grants: Record<string, GrantLevel>
+  memory: MemoryMode
   archived: boolean
 }
 
@@ -43,6 +45,9 @@ export interface Conversation {
   name: string // channel name, or agent id for a DM
   topic?: string
   members: string[] // agent ids
+  summary?: string // what the conversation covered before its recent messages
+  summaryUntil?: number // `at` of the last message the summary covers
+  summaryAt?: number
   unread?: number
 }
 
@@ -74,6 +79,7 @@ export interface Run {
   error?: string
   depth?: number // 1 when a human message triggered it, +1 for each agent-to-agent hop
   question?: string // asked with ask_user; answered by the next human message here
+  memoryIds?: string[] // memories saved or proposed with `lembrar` in this reply
 }
 
 export type Author = { kind: 'me' } | { kind: 'agent'; id: string } | { kind: 'system' }
@@ -92,6 +98,8 @@ export interface Settings {
   context: string
   engines: Record<EngineId, EngineStatus>
   routerModel: string
+  memoryModel: string // summarizes conversations and extracts memories
+  memoryLearning: 'approve' | 'auto' | 'off' // what extracted memories about me become
   defaultLimit: number
   approvalTtlHours: number
   theme: 'system' | 'light' | 'dark'
@@ -178,3 +186,27 @@ export interface Approval {
   expiresAt: number
   decidedAt?: number
 }
+
+// 'me' memories go to every agent; otherwise the scope is the id of the one agent they belong to.
+export type MemoryScope = 'me' | string
+export type MemoryState = 'active' | 'pending' | 'archived' | 'forgotten'
+
+export interface Memory {
+  id: string
+  scope: MemoryScope
+  text: string
+  state: MemoryState
+  origin: 'agent' | 'extraction' | 'me'
+  agentId?: string // the agent that saved it, when origin is 'agent'
+  conversationId?: string
+  messageIds: string[] // evidence
+  replaces?: string // the memory this one supersedes; it becomes archived when this one is active
+  reason?: string // why it was forgotten
+  createdAt: number
+  confirmedAt: number // creation, edit, "still valid", or reinforced by a later conversation
+}
+
+export const SUMMARY_WINDOW = 30 // messages kept verbatim after a consolidation
+export const SUMMARY_MAX_AFTER = 50 // more than this after the summary triggers one
+export const STALE_DAYS = 60
+export const isStale = (m: Memory, now = Date.now()): boolean => m.state === 'active' && now - m.confirmedAt > STALE_DAYS * 86_400_000

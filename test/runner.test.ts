@@ -13,7 +13,7 @@ import { Runner } from '../src/core/runs'
 const ready = { installed: true, loggedIn: true }
 
 function agent(id: string, handle: string, extra: Partial<Agent> = {}): Agent {
-  return { id, name: handle, handle, role: '', color: 'sky', instructions: '', modelId: 'sonnet', effort: 'low', limit: 1_000_000, used: 0, grants: {}, archived: false, ...extra }
+  return { id, name: handle, handle, role: '', color: 'sky', instructions: '', modelId: 'sonnet', effort: 'low', limit: 1_000_000, used: 0, grants: {}, memory: 'auto', archived: false, ...extra }
 }
 
 // Wraps an engine to count how many turns were actually started.
@@ -38,7 +38,7 @@ const agentMessages = (): Message[] => db.messages().filter((m) => m.author.kind
 beforeEach(() => {
   db = new Db(join(mkdtempSync(join(tmpdir(), 'ad-db-')), 'test.db'))
   events = []
-  settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: ready }, routerModel: 'haiku', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system' }
+  settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system' }
   db.saveAgent(agent('a1', 'lia'))
   db.saveAgent(agent('a2', 'theo', { modelId: 'gpt-5.6-luna' }))
   db.createConversation({ id: 'd1', kind: 'dm', name: 'a1', members: ['a1'] })

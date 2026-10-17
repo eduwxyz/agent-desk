@@ -4,6 +4,7 @@ import {
   createChannel,
   navigate,
   pendingApprovals,
+  pendingMemories,
   updateSettings,
   useStore,
   type View
@@ -28,6 +29,7 @@ export function Sidebar(): ReactNode {
   const channels = s.conversations.filter((c) => c.kind === 'channel')
   const dms = s.conversations.filter((c) => c.kind === 'dm')
   const pending = pendingApprovals(s).length
+  const suggestions = pendingMemories(s).length
   const [adding, setAdding] = useState(false)
   const [name, setName] = useState('')
 
@@ -58,6 +60,7 @@ export function Sidebar(): ReactNode {
 
       <nav className="sidebar__scroll">
         <NavItem view={{ kind: 'approvals' }} icon="shield" label="Aprovações" badge={pending} />
+        <NavItem view={{ kind: 'memory' }} icon="book" label="Memória" badge={suggestions} />
 
         <div className="section">
           <div className="section__head">

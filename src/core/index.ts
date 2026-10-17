@@ -18,6 +18,7 @@ import type { Engine } from './engines/types'
 import { ConnectorManager } from './connectors'
 import { Gateway } from './gateway'
 import { mainCipher, plainCipher, Secrets } from './secrets'
+import { Memories } from './memory'
 import { Runner } from './runs'
 import { seed } from './seed'
 
@@ -37,6 +38,8 @@ const DEFAULTS: Omit<Settings, 'engines'> = {
   workspaceName: user ? user[0]!.toUpperCase() + user.slice(1) : 'Eu',
   context: '',
   routerModel: 'haiku',
+  memoryModel: 'haiku',
+  memoryLearning: 'approve',
   defaultLimit: 2_000_000,
   approvalTtlHours: 24,
   theme: 'system'
@@ -85,6 +88,8 @@ gateway.route('/oauth/callback', async (url) => {
   return (await connectors.finishOAuth(state, code)) ? 'Conector autorizado. Pode fechar esta aba e voltar pro agent-desk.' : 'Esse pedido de autorização expirou. Tente de novo pelo app.'
 })
 
+const memory = new Memories({ db, engines: engineImpls, settings: () => ready.then(settings), emit, workDir: join(dataDir, 'agents') })
+
 const runner = new Runner({
   db,
   engines: engineImpls,
@@ -93,6 +98,7 @@ const runner = new Runner({
   workDir: join(dataDir, 'agents'),
   gateway,
   connectors,
+  memory,
   notify: (title, body) => toMain({ type: 'notify', title, body })
 })
 
@@ -116,6 +122,7 @@ const api: Api = {
     messages: db.messages(),
     connectors: connectors.list(),
     approvals: db.approvals(),
+    memories: db.memories(),
     demoServer: existsSync(demoPath) ? { command: 'node', args: [demoPath] } : undefined
   }),
 
@@ -164,6 +171,15 @@ const api: Api = {
   authorizeConnector: ({ id }) => void connectors.authorize(id),
   updateTool: ({ connectorId, name, patch }) => connectors.updateTool(connectorId, name, patch),
   decideApproval: ({ id, decision, reason }) => void runner.decide(id, decision, reason?.trim() || undefined),
+
+  addMemory: ({ scope, text }) => memory.add(scope, text),
+  editMemory: ({ id, text }) => memory.edit(id, text),
+  confirmMemory: ({ id }) => memory.confirm(id),
+  decideMemory: ({ id, accept }) => memory.decide(id, accept),
+  forgetMemory: ({ id, reason }) => memory.forget(id, reason?.trim() || undefined),
+  purgeMemory: ({ id }) => memory.purge(id),
+  editSummary: ({ conversationId, text }) => memory.editSummary(conversationId, text),
+  summarizeNow: ({ conversationId }) => void memory.consolidate(conversationId, true),
 
   refreshEngines: () => {
     void detect()

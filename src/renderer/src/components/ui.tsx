@@ -32,6 +32,7 @@ const PATHS: Record<string, ReactNode> = {
     </>
   ),
   edit: <path d="M4 20h4L19 9l-4-4L4 16v4Z" />,
+  book: <path d="M5 4.5A1.5 1.5 0 0 1 6.5 3H19v15H6.5A1.5 1.5 0 0 0 5 19.5v-15ZM5 19.5A1.5 1.5 0 0 0 6.5 21H19M9 7h6" />,
   lock: (
     <>
       <rect x="5" y="11" width="14" height="10" rx="2" />

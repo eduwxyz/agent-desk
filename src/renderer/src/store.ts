@@ -11,6 +11,8 @@ import {
   type ConnectorTool,
   type Conversation,
   type GrantLevel,
+  type Memory,
+  type MemoryScope,
   type Message,
   type Model,
   type Settings
@@ -26,6 +28,7 @@ export type View =
   | { kind: 'approvals' }
   | { kind: 'usage' }
   | { kind: 'connectors' }
+  | { kind: 'memory' }
   | { kind: 'settings' }
 
 export interface State {
@@ -39,6 +42,7 @@ export interface State {
   conversations: Conversation[]
   messages: Message[]
   approvals: Approval[]
+  memories: Memory[]
   demoServer?: { command: string; args: string[] }
 }
 
@@ -59,6 +63,8 @@ let state: State = {
     context: '',
     engines: { claude: { installed: false, loggedIn: false }, codex: { installed: false, loggedIn: false } },
     routerModel: 'haiku',
+    memoryModel: 'haiku',
+    memoryLearning: 'approve',
     defaultLimit: 2_000_000,
     approvalTtlHours: 24,
     theme: 'system'
@@ -68,7 +74,8 @@ let state: State = {
   connectors: [],
   conversations: [],
   messages: [],
-  approvals: []
+  approvals: [],
+  memories: []
 }
 
 // ---------- store plumbing ----------
@@ -150,6 +157,10 @@ function apply(e: CoreEvent): void {
         return { ...s, connectors: s.connectors.filter((c) => c.id !== e.id) }
       case 'approval':
         return { ...s, approvals: upsert(s.approvals, e.approval) }
+      case 'memory':
+        return { ...s, memories: upsert(s.memories, e.memory) }
+      case 'memory_removed':
+        return { ...s, memories: s.memories.filter((m) => m.id !== e.id) }
     }
   })
 }
@@ -169,6 +180,7 @@ export async function start(): Promise<void> {
       messages: snap.messages,
       connectors: snap.connectors,
       approvals: snap.approvals,
+      memories: snap.memories,
       demoServer: snap.demoServer
     }
   })
@@ -179,6 +191,7 @@ export async function start(): Promise<void> {
 export const agentById = (s: State, id: string): Agent | undefined => s.agents.find((a) => a.id === id)
 export const modelById = (s: State, id: string): Model | undefined => s.models.find((m) => m.id === id)
 export const pendingApprovals = (s: State): Approval[] => s.approvals.filter((a) => a.state === 'pending')
+export const pendingMemories = (s: State): Memory[] => s.memories.filter((m) => m.state === 'pending')
 
 export function conversationTitle(s: State, c: Conversation): string {
   if (c.kind === 'channel') return c.name
@@ -220,6 +233,7 @@ export function newAgentDraft(): Agent {
     limit: state.settings.defaultLimit,
     used: 0,
     grants: {},
+    memory: 'auto',
     archived: false
   }
 }
@@ -236,9 +250,7 @@ export async function openDm(agentId: string): Promise<void> {
 
 export function setGrant(agentId: string, connectorId: string, level: GrantLevel): void {
   const agent = agentById(state, agentId)
-  if (!agent) return
-  const channelIds = state.conversations.filter((c) => c.kind === 'channel' && c.members.includes(agentId)).map((c) => c.id)
-  void saveAgent({ ...agent, grants: { ...agent.grants, [connectorId]: level } }, channelIds)
+  if (agent) patchAgent(agentId, { grants: { ...agent.grants, [connectorId]: level } })
 }
 
 export const updateTool = (connectorId: string, name: string, patch: Partial<Pick<ConnectorTool, 'cls' | 'enabled' | 'highRisk'>>): void =>
@@ -258,3 +270,20 @@ export const retryRun = (messageId: string): void => void call('retryRun', { mes
 
 export const decideApproval = (id: string, decision: 'approved' | 'refused', reason?: string): void =>
   void call('decideApproval', { id, decision, reason })
+
+export const addMemory = (scope: MemoryScope, text: string): void => void call('addMemory', { scope, text })
+export const editMemory = (id: string, text: string): void => void call('editMemory', { id, text })
+export const confirmMemory = (id: string): void => void call('confirmMemory', { id })
+export const decideMemory = (id: string, accept: boolean): void => void call('decideMemory', { id, accept })
+export const forgetMemory = (id: string, reason?: string): void => void call('forgetMemory', { id, reason })
+export const purgeMemory = (id: string): void => void call('purgeMemory', { id })
+export const editSummary = (conversationId: string, text: string): void => void call('editSummary', { conversationId, text })
+export const summarizeNow = (conversationId: string): void => void call('summarizeNow', { conversationId })
+
+// Saves one field of a stored agent without touching the rest of its page.
+export function patchAgent(agentId: string, patch: Partial<Agent>): void {
+  const agent = agentById(state, agentId)
+  if (!agent) return
+  const channelIds = state.conversations.filter((c) => c.kind === 'channel' && c.members.includes(agentId)).map((c) => c.id)
+  void saveAgent({ ...agent, ...patch }, channelIds)
+}

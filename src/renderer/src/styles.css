@@ -1555,3 +1555,106 @@ h3 {
   margin-left: 6px;
   font-family: var(--font);
 }
+
+/* ---------- memory ---------- */
+.summary {
+  margin: 0 20px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--panel);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  box-shadow: var(--shadow);
+}
+.summary__head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.summary textarea {
+  width: 100%;
+  resize: vertical;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.btn--ghost.is-active {
+  background: var(--active);
+}
+.memory-chip {
+  margin-top: 8px;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  max-width: 560px;
+  padding: 6px 10px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  font-size: 12.5px;
+  color: var(--text-2);
+}
+.memory-chip .icon {
+  color: var(--text-3);
+}
+.memory-chip__label {
+  font-weight: 600;
+}
+.memory-chip__text {
+  color: var(--text);
+}
+.memory-chip--pending {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.memory-chip--forgotten .memory-chip__text,
+.memory-chip--archived .memory-chip__text {
+  color: var(--text-3);
+  text-decoration: line-through;
+}
+.memory-section {
+  max-width: 760px;
+}
+.memory-section .section-title .link {
+  font-size: inherit;
+  color: inherit;
+  gap: 6px;
+}
+.memory-section__lead {
+  margin: -6px 0 10px;
+}
+.memory {
+  align-items: flex-start;
+}
+.memory__body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.memory__actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.memory__previous {
+  font-style: italic;
+}
+.memory--add {
+  align-items: center;
+  color: var(--text-3);
+}
+.memory--add input {
+  border: 0;
+  background: transparent;
+  padding: 2px 0;
+}
+.memory--add input:focus {
+  outline: none;
+}
+.memory textarea {
+  resize: vertical;
+  font-size: 13px;
+}

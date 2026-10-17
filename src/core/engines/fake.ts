@@ -1,5 +1,6 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
+import { MEMORY_SYSTEM } from '../memory'
 import { ROUTER_SYSTEM } from '../router'
 import type { Engine, EngineEvent, Turn } from './types'
 
@@ -15,6 +16,8 @@ export function fakeEngine(id: Engine['id'], opts: { delayMs?: number; reply?: (
       let reply: string
       if (turn.system === ROUTER_SYSTEM) {
         reply = JSON.stringify(fakeRoute(turn.prompt))
+      } else if (turn.system === MEMORY_SYSTEM) {
+        reply = JSON.stringify(fakeConsolidation(turn.prompt))
       } else if (opts.reply) {
         reply = opts.reply(turn)
       } else if (/pe[çc]a pr[oa] (\w+)/i.test(last)) {
@@ -26,6 +29,10 @@ export function fakeEngine(id: Engine['id'], opts: { delayMs?: number; reply?: (
         const id = Number(/apag\w* a tarefa (\d+)/i.exec(last)![1])
         await callTool(turn.mcpUrl, await toolNamed(turn.mcpUrl, 'delete_task'), { id, _motivo: 'Você pediu pra apagar.' })
         reply = `Pedi sua aprovação pra apagar a tarefa #${id}.`
+      } else if (turn.mcpUrl && /lembr[ae] que (.+)/i.test(last)) {
+        const texto = /lembr[ae] que (.+)/i.exec(last)![1]!.trim()
+        await callTool(turn.mcpUrl, 'lembrar', { texto, sobre: 'usuario' })
+        reply = 'Anotado.'
       } else if (/pergunt/i.test(last) && turn.mcpUrl) {
         await callTool(turn.mcpUrl, 'ask_user', { question: 'Pra quando você precisa disso?' })
         reply = 'Te mandei uma pergunta.'
@@ -71,6 +78,19 @@ function fakeRoute(prompt: string): { handles: string[]; reason: string } {
   const fit = roster.find((r) => ROLE_WORDS.some(([role, words]) => role.test(r.about) && words.test(last)))
   const pick = fit ?? roster[0]
   return pick ? { handles: [pick.handle], reason: fit ? 'assunto da área dele' : 'primeiro do canal' } : { handles: [], reason: 'sem agentes' }
+}
+
+// Summarizes by listing the first words of each message, and learns "prefiro X"
+// from any author: the memory module must drop what an agent said.
+function fakeConsolidation(prompt: string): { summary: string; memories: { op: string; text: string; evidence: number[] }[] } {
+  const lines = [...prompt.matchAll(/^\((\d+)\) \[[^\]]*\] (.*)$/gm)].map((m) => ({ n: Number(m[1]), text: m[2]! }))
+  const previous = /^Resumo atual:\n(.*)$/m.exec(prompt)?.[1]
+  const summary = [previous && previous !== '(ainda não há)' ? previous : '', `Resumo de teste: ${lines.map((l) => l.text.slice(0, 20)).join(' | ')}`].filter(Boolean).join(' / ')
+  const memories = lines.flatMap((l) => {
+    const m = /prefiro (.+)/i.exec(l.text)
+    return m ? [{ op: 'add', text: `Prefere ${m[1]!.trim()}`, evidence: [l.n] }] : []
+  })
+  return { summary, memories }
 }
 
 const textOf = (r: unknown): string => ((r as { content?: { text?: string }[] }).content ?? []).map((c) => c.text ?? '').join('\n')

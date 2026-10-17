@@ -60,7 +60,7 @@ let seen: { turns: Turn[]; tools: string[][]; results: unknown[] }
 
 const agent = (grant: GrantLevel): Agent => ({
   id: 'a1', name: 'Lia', handle: 'lia', role: '', color: 'sky', instructions: '', modelId: 'sonnet', effort: 'low',
-  limit: 1_000_000, used: 0, grants: { [connectorId]: grant }, archived: false
+  limit: 1_000_000, used: 0, grants: { [connectorId]: grant }, memory: 'auto', archived: false
 })
 
 function runner(plan: (turn: Turn, tools: string[]) => Plan, onDb: Db = db): Runner {
@@ -91,7 +91,7 @@ beforeEach(async () => {
   db = new Db(join(dir, 'test.db'))
   events = []
   seen = { turns: [], tools: [], results: [] }
-  settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: ready }, routerModel: 'haiku', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system' }
+  settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system' }
   gateway = new Gateway()
   await gateway.start()
   connectors = new ConnectorManager({ db, secrets: new Secrets(db, plainCipher), emit: (e) => events.push(e), openUrl: () => {}, oauthCallbackUrl: () => gateway.url('/oauth/callback') })

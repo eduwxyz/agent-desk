@@ -4,7 +4,7 @@ App desktop (Electron) onde você conversa com um time de agentes de IA em canai
 
 Os agentes rodam nas CLIs que você já usa, com a sua assinatura: [Claude Code](https://code.claude.com) (`claude`) e [Codex](https://github.com/openai/codex) (`codex`). Sem chave de API e sem cobrança por uso. O app nunca vê nem guarda suas credenciais.
 
-Status: **M3, governança de ferramentas.** Agentes respondem em canais e DMs pelo Claude Code ou pelo Codex, com streaming, recibos e limite de tokens por agente. Sem menção, um router escolhe quem responde; agentes passam a vez uns pros outros com @menção e podem te fazer perguntas. Conectores MCP (remotos com OAuth ou token, e locais via stdio) entram por um gateway: cada agente só vê as ferramentas que recebeu, e ações sensíveis viram pedidos de aprovação amarrados à chamada exata. Spec do MVP em [`docs/spec-mvp.md`](docs/spec-mvp.md).
+Status: **M4, memória.** Agentes respondem em canais e DMs pelo Claude Code ou pelo Codex, com streaming, recibos e limite de tokens por agente. Sem menção, um router escolhe quem responde; agentes passam a vez uns pros outros com @menção e podem te fazer perguntas. Conectores MCP (remotos com OAuth ou token, e locais via stdio) entram por um gateway: cada agente só vê as ferramentas que recebeu, e ações sensíveis viram pedidos de aprovação amarrados à chamada exata. Cada conversa ganha um resumo do que saiu da janela, e os agentes guardam memórias sobre você e sobre o próprio trabalho, que você vê, aprova, edita e esquece numa tela própria. Spec do MVP em [`docs/spec-mvp.md`](docs/spec-mvp.md).
 
 ## Rodar
 

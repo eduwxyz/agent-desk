@@ -4,7 +4,7 @@ import type { Db } from './db'
 
 // First run: a small team and three channels, so there is someone to talk to.
 export function seed(db: Db): void {
-  const agent = (a: Omit<Agent, 'id' | 'used' | 'grants' | 'archived'>): Agent => ({ ...a, id: randomUUID(), used: 0, grants: {}, archived: false })
+  const agent = (a: Omit<Agent, 'id' | 'used' | 'grants' | 'memory' | 'archived'>): Agent => ({ ...a, id: randomUUID(), used: 0, grants: {}, memory: 'auto', archived: false })
   const lia = agent({
     name: 'Lia',
     handle: 'lia',

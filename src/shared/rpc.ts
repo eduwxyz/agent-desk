@@ -1,5 +1,5 @@
 // The contract between the renderer and the core, carried over a MessagePort.
-import type { Agent, Approval, Connector, ConnectorInput, ConnectorTool, Conversation, EngineId, Message, Settings } from './types'
+import type { Agent, Approval, Connector, ConnectorInput, ConnectorTool, Conversation, EngineId, Memory, MemoryScope, Message, Settings } from './types'
 
 export interface Snapshot {
   settings: Settings
@@ -8,6 +8,7 @@ export interface Snapshot {
   messages: Message[]
   connectors: Connector[]
   approvals: Approval[]
+  memories: Memory[]
   demoServer?: { command: string; args: string[] } // the bundled demo connector, when available
 }
 
@@ -28,6 +29,14 @@ export interface Api {
   authorizeConnector(p: { id: string }): void
   updateTool(p: { connectorId: string; name: string; patch: Partial<Pick<ConnectorTool, 'cls' | 'enabled' | 'highRisk'>> }): void
   decideApproval(p: { id: string; decision: 'approved' | 'refused'; reason?: string }): void
+  addMemory(p: { scope: MemoryScope; text: string }): void
+  editMemory(p: { id: string; text: string }): void
+  confirmMemory(p: { id: string }): void // "still valid"
+  decideMemory(p: { id: string; accept: boolean }): void // a pending one
+  forgetMemory(p: { id: string; reason?: string }): void
+  purgeMemory(p: { id: string }): void // removes even the record that it was forgotten
+  editSummary(p: { conversationId: string; text: string }): void
+  summarizeNow(p: { conversationId: string }): void
 }
 
 export type Method = keyof Api
@@ -43,6 +52,8 @@ export type CoreEvent =
   | { type: 'connector'; connector: Connector }
   | { type: 'connector_removed'; id: string }
   | { type: 'approval'; approval: Approval }
+  | { type: 'memory'; memory: Memory }
+  | { type: 'memory_removed'; id: string }
 
 export type Request = { id: number; method: Method; params: unknown }
 export type Response = { id: number; result?: unknown; error?: string }

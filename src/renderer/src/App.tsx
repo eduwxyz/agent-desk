@@ -3,6 +3,7 @@ import { useStore } from './store'
 import { Sidebar } from './components/Sidebar'
 import { ConversationView } from './components/Conversation'
 import { AgentPage, ApprovalsPage, ConnectorsPage, SettingsPage, UsagePage } from './components/Pages'
+import { MemoryPage } from './components/Memory'
 
 export function App(): ReactNode {
   const view = useStore((s) => s.view)
@@ -25,6 +26,7 @@ export function App(): ReactNode {
         {view.kind === 'approvals' && <ApprovalsPage />}
         {view.kind === 'usage' && <UsagePage />}
         {view.kind === 'connectors' && <ConnectorsPage />}
+        {view.kind === 'memory' && <MemoryPage />}
         {view.kind === 'settings' && <SettingsPage />}
       </main>
     </div>

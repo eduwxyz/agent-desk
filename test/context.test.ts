@@ -14,6 +14,7 @@ const agent = (id: string, handle: string, extra: Partial<Agent> = {}): Agent =>
   limit: 1000,
   used: 0,
   grants: {},
+  memory: 'auto',
   archived: false,
   ...extra
 })

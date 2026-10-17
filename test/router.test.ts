@@ -14,6 +14,7 @@ const agent = (id: string, handle: string, role: string, instructions = ''): Age
   limit: 1000,
   used: 0,
   grants: {},
+  memory: 'auto',
   archived: false
 })
 const lia = agent('a1', 'lia', 'Engenharia', 'Ajuda com código e bugs.\nSegunda linha que não entra.')

@@ -115,6 +115,31 @@ await send('Quais tarefas ainda estão abertas?')
 await settle()
 await shot('16-codex-consultou')
 
+// ---------- M4: memory ----------
+
+await win.click('.section:has-text("Mensagens diretas") .nav-item:has-text("Lia")')
+await send('lembra que eu prefiro PR pequeno, com descrição em bullets')
+await settle()
+await win.waitForSelector('.memory-chip', { timeout: real ? 60_000 : 5000 })
+await shot('17-guardou-memoria')
+
+// Fill the DM past the window, with a preference only I state, then summarize.
+if (!real) {
+  await send('eu prefiro café sem açúcar nas reuniões')
+  await settle()
+  for (let i = 1; i <= 14; i++) {
+    await send(`mensagem de enchimento ${i}`)
+    await settle()
+  }
+  await win.click('.topbar button:has-text("Resumo")')
+  await win.click('.summary button:has-text("Resumir agora")')
+  await win.waitForSelector('.summary textarea', { timeout: 10_000 })
+  await shot('18-resumo')
+}
+
+await win.click('.nav-item:has-text("Memória")')
+await shot('19-memoria')
+
 console.log(errors.length ? `ERRORS:\n${errors.join('\n')}` : 'no console errors')
 console.log(`data: ${data}`)
 await app.close()

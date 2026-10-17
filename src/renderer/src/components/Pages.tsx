@@ -8,6 +8,7 @@ import {
   refreshEngines,
   saveAgent,
   setGrant,
+  patchAgent,
   addConnector,
   authorizeConnector,
   reconnectConnector,
@@ -23,12 +24,13 @@ import {
   type ConnectorAuth,
   type EngineId,
   type GrantLevel,
+  type MemoryMode,
   type ToolClass
 } from '../store'
 import { ApprovalCard } from './Conversation'
 import { AgentAvatar, Icon, time, tokens, UsageBar, usd } from './ui'
 
-function Page({ title, subtitle, actions, children }: { title: ReactNode; subtitle?: ReactNode; actions?: ReactNode; children: ReactNode }): ReactNode {
+export function Page({ title, subtitle, actions, children }: { title: ReactNode; subtitle?: ReactNode; actions?: ReactNode; children: ReactNode }): ReactNode {
   return (
     <section className="page">
       <header className="topbar">
@@ -50,6 +52,11 @@ function Page({ title, subtitle, actions, children }: { title: ReactNode; subtit
 // ---------- Agent profile / creation ----------
 
 const COLORS: AgentColor[] = ['sky', 'indigo', 'violet', 'rose', 'amber', 'green', 'teal', 'graphite']
+const MEMORY_MODES: { value: MemoryMode; label: string; hint: string }[] = [
+  { value: 'auto', label: 'Grava sozinho', hint: 'Guarda e avisa na mensagem, com Desfazer.' },
+  { value: 'approve', label: 'Pede aprovação', hint: 'Cada memória nova espera você guardar.' },
+  { value: 'read', label: 'Só lê', hint: 'Usa as memórias, mas não guarda novas.' }
+]
 const LEVELS: { value: GrantLevel; label: string }[] = [
   { value: 'none', label: 'Sem acesso' },
   { value: 'read', label: 'Ler' },
@@ -63,11 +70,13 @@ export function AgentPage({ id }: { id?: string }): ReactNode {
   const connectors = useStore((s) => s.connectors)
   const channels = useStore((s) => s.conversations.filter((c) => c.kind === 'channel'))
   const handles = useStore((s) => s.agents.map((a) => [a.id, a.handle] as const))
+  const notes = useStore((s) => (id ? s.memories.filter((m) => m.scope === id && m.state === 'active').length : 0))
 
   const [draft, setDraft] = useState<Agent>(() => existing ?? newAgentDraft())
   const [chosen, setChosen] = useState<string[]>(() => (id ? channels.filter((c) => c.members.includes(id)).map((c) => c.id) : []))
   const [saved, setSaved] = useState(false)
   const [grantSaved, setGrantSaved] = useState<string | null>(null)
+  const [memorySaved, setMemorySaved] = useState(false)
 
   useEffect(() => {
     if (existing) {
@@ -244,6 +253,41 @@ export function AgentPage({ id }: { id?: string }): ReactNode {
             <p className="hint">
               <Icon name="shield" size={13} /> Ferramentas sensíveis (merge, deploy, apagar, enviar) sempre viram pedido de aprovação no chat.
             </p>
+          </Card>
+
+          <Card
+            title="Memória"
+            lead={`Memórias sobre você valem pra todos os agentes; as notas de trabalho são só dele.${isNew ? '' : ' Muda na hora, sem precisar salvar.'}`}
+          >
+            <div className="segmented segmented--wide" role="radiogroup" aria-label="Memória">
+              {MEMORY_MODES.map((m) => (
+                <button
+                  key={m.value}
+                  role="radio"
+                  aria-checked={draft.memory === m.value}
+                  className={draft.memory === m.value ? 'is-active' : ''}
+                  onClick={() => {
+                    if (isNew) return patch({ memory: m.value })
+                    setDraft((d) => ({ ...d, memory: m.value }))
+                    patchAgent(draft.id, { memory: m.value })
+                    setMemorySaved(true)
+                  }}
+                >
+                  {m.label}
+                </button>
+              ))}
+            </div>
+            <p className="hint">
+              {MEMORY_MODES.find((m) => m.value === draft.memory)?.hint} {memorySaved && <span className="saved">Salvo</span>}
+            </p>
+            {!isNew && (
+              <p className="muted small">
+                {notes ? `${notes} nota${notes === 1 ? '' : 's'} de trabalho.` : 'Nenhuma nota de trabalho ainda.'}{' '}
+                <button className="link" onClick={() => navigate({ kind: 'memory' })}>
+                  Ver em Memória
+                </button>
+              </p>
+            )}
           </Card>
 
           <Card title="Motor e modelo" lead="O agente roda na CLI que você já usa, com a sua assinatura. Sem chave de API, sem cobrança por uso.">
@@ -850,6 +894,27 @@ export function SettingsPage(): ReactNode {
               ))}
             </select>
           </Field>
+        </Card>
+
+        <Card title="Memória" lead="Um modelo pequeno resume o que sai da janela de cada conversa e, do mesmo trecho, tira o que vale lembrar sobre você.">
+          <div className="grid2">
+            <Field label="Modelo da memória" hint="Roda a cada ~20 mensagens numa conversa longa.">
+              <select value={settings.memoryModel} onChange={(e) => updateSettings({ memoryModel: e.target.value })}>
+                {models.map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {ENGINES[m.engine].label} · {m.label}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            <Field label="O que ele aprende sobre você" hint="Só conta o que você disse, nunca o que um agente supôs.">
+              <select value={settings.memoryLearning} onChange={(e) => updateSettings({ memoryLearning: e.target.value as typeof settings.memoryLearning })}>
+                <option value="approve">Vira sugestão pra você aprovar</option>
+                <option value="auto">Grava sozinho</option>
+                <option value="off">Nada (só resume)</option>
+              </select>
+            </Field>
+          </div>
         </Card>
 
         <Card title="Limites">

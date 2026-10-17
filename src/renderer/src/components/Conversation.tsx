@@ -5,16 +5,23 @@ import {
   agentById,
   conversationTitle,
   decideApproval,
+  decideMemory,
+  editSummary,
   ENGINES,
+  forgetMemory,
   modelById,
   navigate,
   openDm,
   retryRun,
   sendMessage,
   stopRun,
+  summarizeNow,
   useStore,
+  SUMMARY_MAX_AFTER,
+  SUMMARY_WINDOW,
   type Agent,
   type Approval,
+  type Conversation,
   type Message,
   type Step
 } from '../store'
@@ -25,6 +32,7 @@ export function ConversationView({ id }: { id: string }): ReactNode {
   const title = useStore((s) => (conv ? conversationTitle(s, conv) : ''))
   const members = useStore((s) => (conv ? conv.members.map((m) => agentById(s, m)).filter((a): a is Agent => !!a) : []))
   const messages = useStore((s) => s.messages.filter((m) => m.conversationId === id))
+  const [showSummary, setShowSummary] = useState(false)
 
   if (!conv) return <div className="empty">Conversa não encontrada.</div>
   const dmAgent = conv.kind === 'dm' ? members[0] : undefined
@@ -49,6 +57,9 @@ export function ConversationView({ id }: { id: string }): ReactNode {
               <span className="stack__count">{members.length} agente{members.length === 1 ? '' : 's'}</span>
             </div>
           )}
+          <button className={`btn btn--ghost ${showSummary ? 'is-active' : ''}`} title="O que esta conversa já cobriu" onClick={() => setShowSummary(!showSummary)}>
+            <Icon name="book" size={14} /> Resumo
+          </button>
           {dmAgent && (
             <button className="btn btn--ghost" onClick={() => navigate({ kind: 'agent', id: dmAgent.id })}>
               Ver perfil
@@ -56,6 +67,8 @@ export function ConversationView({ id }: { id: string }): ReactNode {
           )}
         </div>
       </header>
+
+      {showSummary && <SummaryPanel conv={conv} messages={messages} onClose={() => setShowSummary(false)} />}
 
       <MessageList messages={messages} conversationId={id} />
       <Composer conversationId={id} members={members} placeholder={dmAgent ? `Mensagem para ${dmAgent.name}` : `Mensagem em #${title}`} />
@@ -161,6 +174,7 @@ function MessageRow({ message, grouped }: { message: Message; grouped: boolean }
         ) : null}
         {message.run?.question && <QuestionCard question={message.run.question} answered={message.run.status !== 'waiting_input'} />}
         {approval && <ApprovalCard approval={approval} />}
+        {message.run?.memoryIds?.map((mid) => <MemoryChip key={mid} id={mid} />)}
         {message.run?.status === 'stopped' && <div className="note">Interrompido por você.</div>}
         {message.run?.status === 'interrupted' && <div className="note">Interrompido: o app fechou no meio da resposta.</div>}
         {message.run?.error && <div className="note note--error">{message.run.error}</div>}
@@ -172,6 +186,91 @@ function MessageRow({ message, grouped }: { message: Message; grouped: boolean }
         {message.run?.receipt && <ReceiptLine receipt={message.run.receipt} />}
       </div>
     </article>
+  )
+}
+
+function SummaryPanel({ conv, messages, onClose }: { conv: Conversation; messages: Message[]; onClose: () => void }): ReactNode {
+  const [text, setText] = useState(conv.summary ?? '')
+  const [asked, setAsked] = useState<number | null>(null)
+  useEffect(() => setText(conv.summary ?? ''), [conv.summary, conv.summaryAt])
+  useEffect(() => {
+    if (asked === null) return
+    const t = setTimeout(() => setAsked(null), 120_000) // give up waiting; the core logs failures
+    return () => clearTimeout(t)
+  }, [asked])
+  const busy = asked !== null && (conv.summaryAt ?? 0) < asked
+  const since = messages.filter((m) => m.author.kind !== 'system' && m.text.trim() && m.at > (conv.summaryUntil ?? 0)).length
+  const changed = text.trim() !== (conv.summary ?? '').trim()
+
+  return (
+    <div className="summary">
+      <div className="summary__head">
+        <strong>Resumo da conversa</strong>
+        <span className="muted small">{conv.summaryAt ? `atualizado ${time(conv.summaryAt)}` : 'ainda não há'}</span>
+        <span className="grow" />
+        <button
+          className="btn btn--sm"
+          disabled={busy || since <= SUMMARY_WINDOW}
+          title={since <= SUMMARY_WINDOW ? `As últimas ${SUMMARY_WINDOW} mensagens sempre vão inteiras; ainda não há o que resumir.` : undefined}
+          onClick={() => {
+            setAsked(Date.now())
+            summarizeNow(conv.id)
+          }}
+        >
+          {busy ? 'Resumindo…' : 'Resumir agora'}
+        </button>
+        <button className="icon-btn" title="Fechar" onClick={onClose}>
+          <Icon name="x" size={14} />
+        </button>
+      </div>
+      {conv.summary !== undefined || changed ? (
+        <textarea rows={6} value={text} onChange={(e) => setText(e.target.value)} />
+      ) : (
+        <p className="muted small">
+          Quando passar de {SUMMARY_MAX_AFTER} mensagens, o que sair da janela vira um resumo aqui, e os agentes recebem o resumo mais as mensagens recentes.
+        </p>
+      )}
+      <div className="row row--between">
+        <span className="hint">
+          Os agentes recebem {conv.summary ? 'este resumo e ' : ''}as {since} mensagens {conv.summary ? 'desde ele' : 'da conversa'}.
+        </span>
+        {changed && (
+          <button className="btn btn--sm btn--primary" onClick={() => editSummary(conv.id, text)}>
+            Salvar resumo
+          </button>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// A memory saved or proposed in this reply, with what I can do about it.
+function MemoryChip({ id }: { id: string }): ReactNode {
+  const memory = useStore((s) => s.memories.find((m) => m.id === id))
+  if (!memory) return null // discarded or deleted
+  const label = { active: 'Guardou', pending: 'Quer guardar', archived: 'Guardou (depois atualizada)', forgotten: 'Esquecida' }[memory.state]
+  return (
+    <div className={`memory-chip memory-chip--${memory.state}`}>
+      <Icon name="book" size={13} />
+      <span className="memory-chip__label">{label}:</span>
+      <span className="memory-chip__text">{memory.text}</span>
+      {memory.scope !== 'me' && <span className="tag">nota dele</span>}
+      {memory.state === 'active' && (
+        <button className="link" onClick={() => forgetMemory(id)}>
+          Desfazer
+        </button>
+      )}
+      {memory.state === 'pending' && (
+        <>
+          <button className="btn btn--xs btn--primary" onClick={() => decideMemory(id, true)}>
+            Guardar
+          </button>
+          <button className="btn btn--xs btn--ghost" onClick={() => decideMemory(id, false)}>
+            Descartar
+          </button>
+        </>
+      )}
+    </div>
   )
 }
 

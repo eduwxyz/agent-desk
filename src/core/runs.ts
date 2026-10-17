@@ -5,6 +5,7 @@ import type { CoreEvent } from '../shared/rpc'
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
 import { ENGINES, modelInfo, type Agent, type Approval, type Connector, type ConnectorTool, type Conversation, type EngineId, type Message, type Receipt, type Run, type RunStatus, type Settings, type Step } from '../shared/types'
 import { HISTORY_LIMIT, mentioned, systemPrompt, transcript } from './context'
+import { LEMBRAR, type Memories } from './memory'
 import type { Db } from './db'
 import type { Engine } from './engines/types'
 import { textResult, type Gateway, type ToolDef } from './gateway'
@@ -37,6 +38,7 @@ export interface RunnerDeps {
   workDir: string // per-agent empty directories live here
   gateway?: Gateway // without it, agents get no tools at all
   connectors?: Connectors
+  memory?: Memories // without it, agents get no memory and see the last HISTORY_LIMIT messages
   notify?: (title: string, body: string) => void
 }
 
@@ -262,10 +264,15 @@ export class Runner {
     mkdirSync(cwd, { recursive: true })
     const members = this.members(conv)
     const peers = members.filter((a) => a.id !== agent.id)
-    const history = db
-      .recentMessages(conv.id, HISTORY_LIMIT + 40)
-      .filter((m) => m.id !== msg.id && m.at <= msg.at)
-      .slice(-HISTORY_LIMIT)
+    const memory = this.deps.memory
+    const { summary, messages: history } = memory?.window(db.conversation(conv.id) ?? conv, msg) ?? {
+      summary: undefined,
+      messages: db
+        .recentMessages(conv.id, HISTORY_LIMIT + 40)
+        .filter((m) => m.id !== msg.id && m.at <= msg.at)
+        .slice(-HISTORY_LIMIT)
+    }
+    const canRemember = !!memory && !!this.deps.gateway && agent.memory !== 'read'
 
     const control: Control = { ctl: new AbortController() }
     this.controllers.set(msg.id, control)
@@ -284,14 +291,16 @@ export class Runner {
     // ask_user plus the connector tools this agent's grants allow.
     let question: string | undefined
     let approval: Approval | undefined
+    const memoryIds: string[] = []
     const exposed = new Map<string, Exposed>()
-    const taken = new Set<string>([ASK_USER.name])
+    const taken = new Set<string>([ASK_USER.name, LEMBRAR.name])
     for (const c of this.deps.connectors?.list() ?? []) {
       if (c.status !== 'connected') continue
       for (const t of db.tools(c.id)) if (allowed(t, agent.grants[c.id])) exposed.set(exposedName(c, t.name, taken), { connector: c, tool: t })
     }
     const toolDefs: ToolDef[] = [
       ASK_USER,
+      ...(canRemember ? [LEMBRAR] : []),
       ...[...exposed].map(([name, { connector, tool }]): ToolDef => {
         const schema = tool.inputSchema as ToolDef['inputSchema']
         if (tool.cls !== 'sensitive') return { name, description: `[${connector.name}] ${tool.description}`, inputSchema: schema }
@@ -324,6 +333,17 @@ export class Runner {
           question = q
           addSteps({ id: randomUUID(), label: 'Perguntou a você', detail: q, status: 'done' })
           return textResult(`Pergunta enviada a ${settings.workspaceName}. Encerre sua resposta agora com no máximo uma frase, sem repetir a pergunta. A resposta chega na próxima mensagem.`)
+        }
+
+        if (name === LEMBRAR.name && canRemember) {
+          const current = db.agent(agent.id) ?? agent // the mode may have changed mid-turn
+          if (current.memory === 'read') return textResult('Sua memória está só leitura agora.', true)
+          const r = memory!.remember(current, conv, args)
+          if (!r.memory) return textResult(r.reply, r.error)
+          memoryIds.push(r.memory.id)
+          msg.run = { ...msg.run!, memoryIds: [...memoryIds] }
+          addSteps({ id: randomUUID(), label: r.label!, detail: r.memory.text, status: 'done' })
+          return textResult(r.reply)
         }
 
         const hit = exposed.get(name)
@@ -391,8 +411,8 @@ export class Runner {
       const events = engines[engineId].run({
         model: agent.modelId,
         effort: agent.effort,
-        system: systemPrompt({ agent, settings, conversation: conv, peers }),
-        prompt: transcript({ agent, conversation: conv, messages: history, agents: db.agents(), me: settings.workspaceName, task: opts.task }),
+        system: systemPrompt({ agent, settings, conversation: conv, peers, memories: memory?.forPrompt(agent), canRemember }),
+        prompt: transcript({ agent, conversation: conv, messages: history, agents: db.agents(), me: settings.workspaceName, task: opts.task, summary }),
         cwd,
         signal: control.ctl.signal,
         mcpUrl: session?.url
@@ -430,7 +450,7 @@ export class Runner {
         : undefined
     if (receipt) db.addReceipt({ ...receipt, messageId: msg.id, agentId: agent.id, engine: engineId, at: Date.now() })
 
-    const base = { depth: opts.depth, receipt, question, approvalId: approval?.id }
+    const base = { depth: opts.depth, receipt, question, approvalId: approval?.id, memoryIds: memoryIds.length ? memoryIds : undefined }
     if (control.reason === 'stopped') {
       save({ run: { ...base, status: 'stopped', steps: closeThinking('error', 'Parado') } })
     } else if (control.reason === 'limit') {
@@ -451,6 +471,7 @@ export class Runner {
 
     const updated = db.agent(agent.id)
     if (updated) emit({ type: 'agent', agent: updated })
+    void memory?.consolidate(conv.id)
   }
 
   // The first decision wins. Approving runs exactly the stored call (after

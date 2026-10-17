@@ -1,5 +1,5 @@
 import { DatabaseSync } from 'node:sqlite'
-import type { Agent, AgentColor, Approval, ApprovalState, Author, Connector, ConnectorAuth, ConnectorTool, Conversation, Effort, Message, Receipt, Run, Settings, ToolClass } from '../shared/types'
+import type { Agent, AgentColor, Approval, ApprovalState, Author, Connector, ConnectorAuth, ConnectorTool, Conversation, Effort, Memory, MemoryMode, MemoryState, Message, Receipt, Run, Settings, ToolClass } from '../shared/types'
 
 // Each entry runs once, in order; PRAGMA user_version records how far we got.
 const MIGRATIONS = [
@@ -102,6 +102,27 @@ const MIGRATIONS = [
   CREATE INDEX approvals_by_state ON approvals (state, created_at);
   -- Encrypted by the OS keychain (Electron safeStorage) before they get here.
   CREATE TABLE secrets (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+  `,
+  `
+  ALTER TABLE agents ADD COLUMN memory_mode TEXT NOT NULL DEFAULT 'auto';
+  ALTER TABLE conversations ADD COLUMN summary TEXT;
+  ALTER TABLE conversations ADD COLUMN summary_until INTEGER;
+  ALTER TABLE conversations ADD COLUMN summary_at INTEGER;
+  CREATE TABLE memories (
+    id TEXT PRIMARY KEY,
+    scope TEXT NOT NULL,
+    text TEXT NOT NULL,
+    state TEXT NOT NULL CHECK (state IN ('active', 'pending', 'archived', 'forgotten')),
+    origin TEXT NOT NULL,
+    agent_id TEXT,
+    conversation_id TEXT,
+    message_ids TEXT NOT NULL DEFAULT '[]',
+    replaces TEXT,
+    reason TEXT,
+    created_at INTEGER NOT NULL,
+    confirmed_at INTEGER NOT NULL
+  );
+  CREATE INDEX memories_by_scope ON memories (scope, state);
   `
 ]
 
@@ -181,6 +202,7 @@ export class Db {
       limit: Number(r['limit_tokens']),
       used: this.usedThisMonth(str(r['id'])),
       grants: JSON.parse(str(r['grants']) || '{}') as Agent['grants'],
+      memory: (str(r['memory_mode']) || 'auto') as MemoryMode,
       archived: r['archived'] === 1
     }
   }
@@ -197,13 +219,13 @@ export class Db {
   saveAgent(a: Agent): void {
     this.db
       .prepare(
-        `INSERT INTO agents (id, name, handle, role, color, instructions, model, effort, limit_tokens, grants, archived, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `INSERT INTO agents (id, name, handle, role, color, instructions, model, effort, limit_tokens, grants, memory_mode, archived, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT (id) DO UPDATE SET name = excluded.name, handle = excluded.handle, role = excluded.role,
            color = excluded.color, instructions = excluded.instructions, model = excluded.model, effort = excluded.effort,
-           limit_tokens = excluded.limit_tokens, grants = excluded.grants, archived = excluded.archived`
+           limit_tokens = excluded.limit_tokens, grants = excluded.grants, memory_mode = excluded.memory_mode, archived = excluded.archived`
       )
-      .run(a.id, a.name, a.handle, a.role, a.color, a.instructions, a.modelId, a.effort, a.limit, JSON.stringify(a.grants), a.archived ? 1 : 0, Date.now())
+      .run(a.id, a.name, a.handle, a.role, a.color, a.instructions, a.modelId, a.effort, a.limit, JSON.stringify(a.grants), a.memory ?? 'auto', a.archived ? 1 : 0, Date.now())
   }
 
   usedThisMonth(agentId: string): number {
@@ -223,8 +245,17 @@ export class Db {
       kind: str(r['kind']) as Conversation['kind'],
       name: str(r['name']),
       topic: r['topic'] ? str(r['topic']) : undefined,
-      members: members.filter((m) => m.conversation_id === r['id']).map((m) => m.agent_id)
+      members: members.filter((m) => m.conversation_id === r['id']).map((m) => m.agent_id),
+      summary: r['summary'] ? str(r['summary']) : undefined,
+      summaryUntil: r['summary_until'] ? Number(r['summary_until']) : undefined,
+      summaryAt: r['summary_at'] ? Number(r['summary_at']) : undefined
     }))
+  }
+
+  // `until` is the `at` of the last message the summary covers; leave it out to keep it (a hand edit).
+  setSummary(conversationId: string, summary: string, until?: number): void {
+    if (until === undefined) this.db.prepare('UPDATE conversations SET summary = ?, summary_at = ? WHERE id = ?').run(summary, Date.now(), conversationId)
+    else this.db.prepare('UPDATE conversations SET summary = ?, summary_until = ?, summary_at = ? WHERE id = ?').run(summary, until, Date.now(), conversationId)
   }
 
   conversation(id: string): Conversation | undefined {
@@ -277,6 +308,11 @@ export class Db {
   recentMessages(conversationId: string, limit: number): Message[] {
     const rows = this.db.prepare('SELECT * FROM messages WHERE conversation_id = ? ORDER BY at DESC LIMIT ?').all(conversationId, limit) as Row[]
     return rows.reverse().map((r) => this.toMessage(r))
+  }
+
+  // Oldest first.
+  messagesAfter(conversationId: string, at: number): Message[] {
+    return (this.db.prepare('SELECT * FROM messages WHERE conversation_id = ? AND at > ? ORDER BY at').all(conversationId, at) as Row[]).map((r) => this.toMessage(r))
   }
 
   message(id: string): Message | undefined {
@@ -480,5 +516,52 @@ export class Db {
     return this.db
       .prepare('SELECT COALESCE(SUM(input_tokens + output_tokens), 0) AS tokens FROM receipts WHERE message_id = ?')
       .get(messageId) as { tokens: number }
+  }
+
+  // ---------- memories ----------
+
+  private toMemory(r: Row): Memory {
+    return {
+      id: str(r['id']),
+      scope: str(r['scope']),
+      text: str(r['text']),
+      state: str(r['state']) as MemoryState,
+      origin: str(r['origin']) as Memory['origin'],
+      agentId: r['agent_id'] ? str(r['agent_id']) : undefined,
+      conversationId: r['conversation_id'] ? str(r['conversation_id']) : undefined,
+      messageIds: JSON.parse(str(r['message_ids']) || '[]') as string[],
+      replaces: r['replaces'] ? str(r['replaces']) : undefined,
+      reason: r['reason'] ? str(r['reason']) : undefined,
+      createdAt: Number(r['created_at']),
+      confirmedAt: Number(r['confirmed_at'])
+    }
+  }
+
+  memories(filter: { scope?: string; state?: MemoryState } = {}): Memory[] {
+    const where: string[] = []
+    const args: string[] = []
+    if (filter.scope) where.push('scope = ?'), args.push(filter.scope)
+    if (filter.state) where.push('state = ?'), args.push(filter.state)
+    const sql = `SELECT * FROM memories${where.length ? ` WHERE ${where.join(' AND ')}` : ''} ORDER BY created_at`
+    return (this.db.prepare(sql).all(...args) as Row[]).map((r) => this.toMemory(r))
+  }
+
+  memory(id: string): Memory | undefined {
+    const r = this.db.prepare('SELECT * FROM memories WHERE id = ?').get(id) as Row | undefined
+    return r && this.toMemory(r)
+  }
+
+  saveMemory(m: Memory): void {
+    this.db
+      .prepare(
+        `INSERT INTO memories (id, scope, text, state, origin, agent_id, conversation_id, message_ids, replaces, reason, created_at, confirmed_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (id) DO UPDATE SET text = excluded.text, state = excluded.state, reason = excluded.reason, confirmed_at = excluded.confirmed_at`
+      )
+      .run(m.id, m.scope, m.text, m.state, m.origin, m.agentId ?? null, m.conversationId ?? null, JSON.stringify(m.messageIds), m.replaces ?? null, m.reason ?? null, m.createdAt, m.confirmedAt)
+  }
+
+  deleteMemory(id: string): void {
+    this.db.prepare('DELETE FROM memories WHERE id = ?').run(id)
   }
 }

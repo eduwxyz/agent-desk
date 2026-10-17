@@ -25,6 +25,8 @@ Usuário do MVP: eu, numa máquina só. Quem baixar o repositório usa do mesmo 
 | **Ferramenta** | Uma tool de um conector, classificada como `read`, `write` ou `sensitive`. |
 | **Grant** | Nível de acesso de um agente a um conector: `none`, `read` ou `read_write`. |
 | **Aprovação** | Pedido para executar uma chamada `sensitive` específica (ferramenta + argumentos exatos). |
+| **Resumo** | O que uma conversa já cobriu e saiu da janela de mensagens: decisões, pendências, estado do trabalho. Um por canal ou DM. |
+| **Memória** | Uma nota durável, curta, com origem. **Sobre mim** (vale pra todos os agentes) ou **do agente** (só dele). |
 | **Recibo** | Registro de cada turno: motor, modelo, tokens (in/out/cache/raciocínio), duração e, quando a CLI informa, o custo equivalente em API. |
 
 ## Behaviors
@@ -137,6 +139,37 @@ Expostas pelo gateway, como qualquer outra. Todas as demais vêm de conectores M
 - **Motores:** status de cada CLI (instalada, versão, logada), botão **Entrar** que abre o login da própria CLI num Terminal, e caminho customizado do binário.
 - Contexto do workspace, motor e modelo do router, limites de run, expiração de aprovação, limite de uso default.
 
+### 12. Memória (M4)
+
+Hoje cada turno vê só as últimas 30 mensagens da conversa e nada de outras conversas. O M4 dá dois níveis de memória, sempre visíveis e editáveis, e um jeito de esquecer que não volta sozinho.
+
+Referências: o modelo do **Honcho** (participantes e conversas, resumos por sessão, conclusões que atravessam sessões), a decisão adicionar/atualizar/nada do **Mem0**, os memory blocks do **Letta**. Nenhum entra como dependência: todos pedem Python, banco à parte ou LLM por API. Fica tudo no SQLite, com a CLI do usuário fazendo o trabalho de modelo.
+
+**Curto prazo: resumo da conversa**
+
+- Cada canal e DM tem um resumo. O turno recebe o resumo **mais todas as mensagens depois dele**, inteiras.
+- Quando passam de 50 mensagens depois do resumo, as mais antigas (todas menos as últimas 30) são **consolidadas**: um modelo pequeno (default Haiku) recebe o resumo anterior + essas mensagens e devolve o resumo novo, de até ~500 palavras. É recursivo: o resumo pende pro recente, sem perder o começo.
+- O resumo aparece no topo da conversa (**Resumo**). Dá pra corrigir à mão e pedir **Resumir agora**.
+- Recibo próprio, atribuído a "Memória" na tela de Uso.
+
+**Longo prazo: memórias**
+
+- Dois escopos: **sobre mim** (entra no prompt de todo agente) e **do agente** (só no dele). Até 40 por escopo no prompt, as confirmadas mais recentemente primeiro. Busca semântica só quando isso não couber mais.
+- Cada memória guarda origem: quem criou (agente, extração ou eu), conversa e mensagens de onde veio.
+- **Como entram:**
+  1. **O agente guarda** com a ferramenta `lembrar` (texto, sobre mim ou dele, e opcionalmente qual memória substitui). Por agente, um modo: **grava sozinho** (default; aparece "Guardou: …" na mensagem, com Desfazer), **pede aprovação** (fica "Quer guardar: …" com Guardar/Descartar) ou **só lê**.
+  2. **A consolidação extrai** do mesmo trecho que vai pro resumo: o modelo recebe as memórias sobre mim que existem e devolve, por item, *adicionar*, *atualizar a memória X* ou *confirmar a memória X*. Só vira fato sobre mim o que **eu** disse: uma extração sem evidência numa mensagem minha é descartada. Default: **viram sugestões** que eu aceito ou descarto; dá pra trocar pra gravar sozinho ou desligar.
+  3. **Eu escrevo** uma memória direto na tela de Memória.
+- **Atualizar não apaga:** a versão nova entra e a velha fica arquivada, com a linha do tempo visível.
+
+**Esquecer**
+
+- **Esquecer** (por mim, ou o Desfazer do chat) tira a memória do prompt na hora e guarda um registro do que foi esquecido. A extração recebe esses registros como "não reaprender", e o app descarta qualquer memória nova igual a uma esquecida. Isso evita o problema do Honcho, em que uma conclusão apagada volta porque as mensagens de origem continuam lá.
+- **Apagar de vez** remove até o registro (aí pode ser aprendida de novo).
+- **Envelhecer sem sumir:** memória sem confirmação há 60 dias vai pra **Revisar** ("ainda vale?"). Nada some sozinho. A consolidação confirma uma memória quando a conversa reforça ela.
+
+**Tela de Memória** (sidebar): Sugestões (com badge), Revisar, Sobre mim, uma seção por agente, Esquecidas. Cada item mostra texto, origem, data e ações (editar, esquecer, histórico).
+
 ## Acceptance criteria
 
 1. **Chat básico:** crio um agente no Claude Code, abro DM, mando uma mensagem e vejo a resposta em streaming, com rodapé de modelo/tokens/duração. O mesmo funciona com um agente no Codex.
@@ -163,6 +196,10 @@ Expostas pelo gateway, como qualquer outra. Todas as demais vêm de conectores M
     - parser de eventos de cada motor (com saídas gravadas das CLIs reais);
     - router com motor fake;
     - reducer do front para eventos de streaming.
+16. **Resumo (M4):** numa conversa com mais de 50 mensagens, o turno do agente recebe o resumo + as mensagens recentes, e uma informação dita lá no começo ainda chega a ele.
+17. **Memória entre conversas (M4):** digo na DM da Lia "eu prefiro PR pequeno"; ela guarda; no #engenharia o Theo recebe essa memória no prompt.
+18. **Governança da memória (M4):** com "pede aprovação", nada entra no prompt antes de eu aceitar. Uma extração baseada só no que um agente disse não vira memória sobre mim.
+19. **Esquecer (M4):** esqueço uma memória; ela sai do prompt e a consolidação seguinte, sobre as mesmas mensagens, não a recria.
 
 ## Out of scope (MVP)
 
@@ -172,7 +209,8 @@ Expostas pelo gateway, como qualquer outra. Todas as demais vêm de conectores M
 - Sessões persistentes da CLI (`--resume`) como otimização.
 - Streaming token a token no Codex (via `codex app-server`).
 - Rotinas (agendamento e gatilhos por evento).
-- Memória, lições e propostas de mudança de instrução.
+- Lições e propostas de mudança de instrução (a memória entrou no M4).
+- Busca semântica nas memórias (embeddings).
 - Threads, fórum, wiki, drive, issues, agenda, busca global.
 - Skills (SKILL.md).
 - Multiusuário, sincronização, modo time, servidor.
@@ -247,7 +285,9 @@ Expostas pelo gateway, como qualquer outra. Todas as demais vêm de conectores M
 2. **M2, quem responde (feito):** router, menções, anti-loop, fila de runs, `ask_user`, retomada. (AC 2, 3, 4, 11) O gateway entrou aqui, com `ask_user` como primeira ferramenta, pra validar cedo que as duas CLIs usam ferramentas do app. "Retomar" refaz a resposta inteira no lugar (não há passo a passo pra continuar enquanto não houver ferramentas de conector).
 3. **M3, governança de ferramentas (feito):** conectores MCP plugados no gateway, classificação, grants, aprovações. (AC 5, 6, 7, 10) Testado de ponta a ponta com o servidor de demonstração (`scripts/demo-mcp-server.mjs`) e o Claude Code real. Falta validar o OAuth com um provedor real (Linear) e o Codex real com conectores, que depende do login próprio.
 
-O MVP termina quando os três estiverem prontos e eu usar o app por uma semana no dia a dia.
+4. **M4, memória (feito):** resumo por conversa, memórias sobre mim e por agente, ferramenta `lembrar`, extração na consolidação, esquecer com registro, Revisar. (AC 16, 17, 18, 19) Testado com o Claude Code real: o Sonnet guardou sozinho uma preferência dita de passagem, na terceira pessoa; outro agente usou ela num canal; o Haiku resumiu, extraiu só o que eu disse (ignorou um palpite do agente) e não recriou uma memória esquecida ao reler as mesmas mensagens.
+
+O MVP termina quando os quatro estiverem prontos e eu usar o app por uma semana no dia a dia.
 
 ## Riscos
 
