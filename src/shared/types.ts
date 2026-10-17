@@ -85,7 +85,7 @@ export interface Run {
   services?: string[] // services started in this reply, by name, on the author's computer
 }
 
-export type Author = { kind: 'me' } | { kind: 'agent'; id: string } | { kind: 'system' }
+export type Author = { kind: 'me' } | { kind: 'agent'; id: string } | { kind: 'system' } | { kind: 'routine'; id: string }
 
 export interface Message {
   id: string
@@ -94,6 +94,7 @@ export interface Message {
   text: string
   at: number
   run?: Run
+  routine?: RoutineRun // set on the message a routine posts (author kind 'routine')
 }
 
 export interface Settings {
@@ -106,6 +107,7 @@ export interface Settings {
   defaultLimit: number
   approvalTtlHours: number
   theme: 'system' | 'light' | 'dark'
+  openAtLogin?: boolean // so routines run without me opening the app
 }
 
 export const ENGINES: Record<EngineId, { label: string; cli: string; login: string }> = {
@@ -251,3 +253,66 @@ export interface Artifact {
 }
 
 export const artifactUrl = (a: Pick<Artifact, 'id' | 'name'>): string => `agentdesk://artifact/${a.id}/${encodeURIComponent(a.name)}`
+
+// ---------- routines (spec §14) ----------
+
+export interface Schedule {
+  days: number[] // 0 = Sunday … 6 = Saturday
+  time: string // "HH:MM", Mac local time
+}
+
+export interface Routine {
+  id: string
+  name: string
+  agentId: string
+  conversationId: string // the agent's DM or a channel it belongs to
+  prompt: string
+  schedule: Schedule
+  enabled: boolean
+  nextAt?: number // undefined while off
+  lastAt?: number
+  lastMessageId?: string // the agent's reply in the last run
+  createdAt: number
+}
+
+export type RoutineInput = Pick<Routine, 'name' | 'agentId' | 'conversationId' | 'prompt' | 'schedule' | 'enabled'> & { id?: string }
+
+// What the routine's message in the conversation remembers about that run.
+export interface RoutineRun {
+  name: string
+  scheduledAt: number
+  late: boolean // ran after the app came back, not at the time
+}
+
+const DAY_SHORT = ['dom', 'seg', 'ter', 'qua', 'qui', 'sex', 'sáb']
+const EVERY_DAY = ['Todo domingo', 'Toda segunda', 'Toda terça', 'Toda quarta', 'Toda quinta', 'Toda sexta', 'Todo sábado']
+
+export const validTime = (t: string): boolean => /^([01]\d|2[0-3]):[0-5]\d$/.test(t)
+
+// The first time after `after` that matches the schedule.
+export function nextRun(s: Schedule, after: number): number | undefined {
+  if (!validTime(s.time) || s.days.length === 0) return undefined
+  const [h, m] = s.time.split(':').map(Number) as [number, number]
+  const d = new Date(after)
+  for (let i = 0; i <= 7; i++) {
+    const at = new Date(d.getFullYear(), d.getMonth(), d.getDate() + i, h, m).getTime()
+    if (at > after && s.days.includes(new Date(at).getDay())) return at
+  }
+  return undefined
+}
+
+export function describeSchedule(s: Schedule): string {
+  const days = [...new Set(s.days)].sort()
+  const hour = s.time.replace(/^0(\d)/, '$1').replace(':00', 'h')
+  const when =
+    days.length === 7
+      ? 'Todo dia'
+      : days.join() === '1,2,3,4,5'
+        ? 'Seg a sex'
+        : days.join() === '0,6'
+          ? 'Fim de semana'
+          : days.length === 1
+            ? EVERY_DAY[days[0]!]
+            : days.map((d) => DAY_SHORT[d]).join(', ').replace(/, ([^,]+)$/, ' e $1').replace(/^./, (c) => c.toUpperCase())
+  return `${when} às ${hour}`
+}

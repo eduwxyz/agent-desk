@@ -1,5 +1,5 @@
 // The contract between the renderer and the core, carried over a MessagePort.
-import type { Agent, Approval, Artifact, ComputerInfo, Connector, ConnectorInput, ConnectorTool, Conversation, EngineId, Memory, MemoryScope, Message, Settings } from './types'
+import type { Agent, Approval, Artifact, ComputerInfo, Connector, ConnectorInput, ConnectorTool, Conversation, EngineId, Memory, MemoryScope, Message, Routine, RoutineInput, Settings } from './types'
 
 export interface Snapshot {
   settings: Settings
@@ -11,6 +11,8 @@ export interface Snapshot {
   memories: Memory[]
   artifacts: Artifact[]
   computers: ComputerInfo[]
+  routines: Routine[]
+  packaged: boolean // installed app, not `npm run dev` (opening at login only works there)
   demoServer?: { command: string; args: string[] } // the bundled demo connector, when available
 }
 
@@ -42,6 +44,9 @@ export interface Api {
   computerAction(p: { agentId: string; action: 'start' | 'restart' | 'erase' | 'open_folder' | 'refresh' }): void
   stopService(p: { agentId: string; name: string }): void
   openExternal(p: { url: string }): void
+  saveRoutine(p: { routine: RoutineInput }): Routine // throws a message for the form
+  removeRoutine(p: { id: string }): void
+  runRoutine(p: { id: string }): void
 }
 
 export type Method = keyof Api
@@ -61,6 +66,8 @@ export type CoreEvent =
   | { type: 'memory_removed'; id: string }
   | { type: 'computer'; computer: ComputerInfo }
   | { type: 'artifact'; artifact: Artifact }
+  | { type: 'routine'; routine: Routine }
+  | { type: 'routine_removed'; id: string }
 
 export type Request = { id: number; method: Method; params: unknown }
 export type Response = { id: number; result?: unknown; error?: string }

@@ -1,5 +1,5 @@
 import { DatabaseSync } from 'node:sqlite'
-import type { Agent, AgentColor, Approval, ApprovalState, Artifact, ArtifactKind, Author, Connector, ConnectorAuth, ConnectorTool, Conversation, Effort, Memory, MemoryMode, MemoryState, Message, Receipt, Run, Settings, ToolClass } from '../shared/types'
+import type { Agent, AgentColor, Approval, ApprovalState, Artifact, ArtifactKind, Author, Connector, ConnectorAuth, ConnectorTool, Conversation, Effort, Memory, MemoryMode, MemoryState, Message, Receipt, Routine, RoutineRun, Run, Settings, ToolClass } from '../shared/types'
 
 // Each entry runs once, in order; PRAGMA user_version records how far we got.
 const MIGRATIONS = [
@@ -146,6 +146,23 @@ const MIGRATIONS = [
     started_at INTEGER NOT NULL,
     PRIMARY KEY (agent_id, name)
   );
+  `,
+  `
+  CREATE TABLE routines (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    agent_id TEXT NOT NULL,
+    conversation_id TEXT NOT NULL,
+    prompt TEXT NOT NULL,
+    days TEXT NOT NULL,
+    time TEXT NOT NULL,
+    enabled INTEGER NOT NULL,
+    next_at INTEGER,
+    last_at INTEGER,
+    last_message_id TEXT,
+    created_at INTEGER NOT NULL
+  );
+  ALTER TABLE messages ADD COLUMN routine TEXT;
   `
 ]
 
@@ -315,14 +332,16 @@ export class Db {
 
   private toMessage(r: Row): Message {
     const kind = str(r['author_kind'])
-    const author: Author = kind === 'agent' ? { kind: 'agent', id: str(r['author_id']) } : kind === 'system' ? { kind: 'system' } : { kind: 'me' }
+    const author: Author =
+      kind === 'agent' || kind === 'routine' ? { kind, id: str(r['author_id']) } : kind === 'system' ? { kind: 'system' } : { kind: 'me' }
     return {
       id: str(r['id']),
       conversationId: str(r['conversation_id']),
       author,
       text: str(r['text']),
       at: Number(r['at']),
-      run: r['run'] ? (JSON.parse(str(r['run'])) as Run) : undefined
+      run: r['run'] ? (JSON.parse(str(r['run'])) as Run) : undefined,
+      routine: r['routine'] ? (JSON.parse(str(r['routine'])) as RoutineRun) : undefined
     }
   }
 
@@ -348,10 +367,19 @@ export class Db {
   saveMessage(m: Message): void {
     this.db
       .prepare(
-        `INSERT INTO messages (id, conversation_id, author_kind, author_id, text, at, run) VALUES (?, ?, ?, ?, ?, ?, ?)
+        `INSERT INTO messages (id, conversation_id, author_kind, author_id, text, at, run, routine) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT (id) DO UPDATE SET text = excluded.text, run = excluded.run`
       )
-      .run(m.id, m.conversationId, m.author.kind, m.author.kind === 'agent' ? m.author.id : null, m.text, m.at, m.run ? JSON.stringify(m.run) : null)
+      .run(
+        m.id,
+        m.conversationId,
+        m.author.kind,
+        'id' in m.author ? m.author.id : null,
+        m.text,
+        m.at,
+        m.run ? JSON.stringify(m.run) : null,
+        m.routine ? JSON.stringify(m.routine) : null
+      )
   }
 
   // Runs that were working when the app closed can't continue: their CLI process is gone.
@@ -635,5 +663,42 @@ export class Db {
   removeServices(agentId: string, name?: string): void {
     if (name) this.db.prepare('DELETE FROM services WHERE agent_id = ? AND name = ?').run(agentId, name)
     else this.db.prepare('DELETE FROM services WHERE agent_id = ?').run(agentId)
+  }
+
+  // ---------- routines ----------
+
+  routines(): Routine[] {
+    return (this.db.prepare('SELECT * FROM routines ORDER BY created_at').all() as Row[]).map((r) => ({
+      id: str(r['id']),
+      name: str(r['name']),
+      agentId: str(r['agent_id']),
+      conversationId: str(r['conversation_id']),
+      prompt: str(r['prompt']),
+      schedule: { days: JSON.parse(str(r['days']) || '[]') as number[], time: str(r['time']) },
+      enabled: r['enabled'] === 1,
+      nextAt: r['next_at'] == null ? undefined : Number(r['next_at']),
+      lastAt: r['last_at'] == null ? undefined : Number(r['last_at']),
+      lastMessageId: r['last_message_id'] ? str(r['last_message_id']) : undefined,
+      createdAt: Number(r['created_at'])
+    }))
+  }
+
+  routine(id: string): Routine | undefined {
+    return this.routines().find((r) => r.id === id)
+  }
+
+  saveRoutine(r: Routine): void {
+    this.db
+      .prepare(
+        `INSERT INTO routines (id, name, agent_id, conversation_id, prompt, days, time, enabled, next_at, last_at, last_message_id, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (id) DO UPDATE SET name = excluded.name, agent_id = excluded.agent_id, conversation_id = excluded.conversation_id, prompt = excluded.prompt,
+           days = excluded.days, time = excluded.time, enabled = excluded.enabled, next_at = excluded.next_at, last_at = excluded.last_at, last_message_id = excluded.last_message_id`
+      )
+      .run(r.id, r.name, r.agentId, r.conversationId, r.prompt, JSON.stringify(r.schedule.days), r.schedule.time, r.enabled ? 1 : 0, r.nextAt ?? null, r.lastAt ?? null, r.lastMessageId ?? null, r.createdAt)
+  }
+
+  removeRoutine(id: string): void {
+    this.db.prepare('DELETE FROM routines WHERE id = ?').run(id)
   }
 }

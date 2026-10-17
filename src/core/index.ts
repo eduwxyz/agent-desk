@@ -20,6 +20,7 @@ import { Gateway } from './gateway'
 import { mainCipher, plainCipher, Secrets } from './secrets'
 import { Computers, type Shooter } from './computer'
 import { Memories } from './memory'
+import { Routines } from './routines'
 import { Runner } from './runs'
 import { seed } from './seed'
 
@@ -72,7 +73,12 @@ function emit(event: CoreEvent): void {
 }
 
 // Asks the main process to do what only it can: open the browser or a folder, show a notification.
-const toMain = (msg: { type: 'open'; url: string } | { type: 'open_path'; path: string } | { type: 'notify'; title: string; body: string }): void =>
+type ToMain =
+  | { type: 'open'; url: string }
+  | { type: 'open_path'; path: string }
+  | { type: 'notify'; title: string; body: string; conversationId?: string }
+  | { type: 'login_item'; open: boolean }
+const toMain = (msg: ToMain): void =>
   process.parentPort.postMessage(msg)
 
 // Screenshots use Electron's Chromium, which lives in the main process.
@@ -121,15 +127,19 @@ const runner = new Runner({
   connectors,
   memory,
   computers,
-  notify: (title, body) => toMain({ type: 'notify', title, body })
+  notify: (title, body, conversationId) => toMain({ type: 'notify', title, body, conversationId })
 })
+
+const routines = new Routines({ db, runner, emit, notify: (title, body, conversationId) => toMain({ type: 'notify', title, body, conversationId }) })
 
 void ready.then(async () => {
   connectors.connectAll()
   for (const a of db.agents()) if (a.computer && !a.archived) void computers.refresh(a)
   await runner.expireApprovals()
   setInterval(() => void runner.expireApprovals(), 60_000).unref()
+  routines.start()
 })
+toMain({ type: 'login_item', open: !!settings().openAtLogin })
 
 function emitConversations(ids?: string[]): void {
   for (const c of db.conversations()) if (!ids || ids.includes(c.id)) emit({ type: 'conversation', conversation: c })
@@ -148,6 +158,8 @@ const api: Api = {
     memories: db.memories(),
     artifacts: db.artifacts(),
     computers: db.agents().map((a) => computers.info(a)),
+    routines: db.routines(),
+    packaged: process.env['AGENT_DESK_PACKAGED'] === '1',
     demoServer: existsSync(demoPath) ? { command: 'node', args: [demoPath] } : undefined
   }),
 
@@ -189,6 +201,7 @@ const api: Api = {
 
   updateSettings: ({ patch }) => {
     db.setSettings(patch)
+    if (patch.openAtLogin !== undefined) toMain({ type: 'login_item', open: patch.openAtLogin })
     emit({ type: 'settings', settings: settings() })
   },
 
@@ -222,6 +235,10 @@ const api: Api = {
   },
   stopService: ({ agentId, name }) => void computers.stopService(agentId, name),
   openExternal: ({ url }) => toMain({ type: 'open', url }),
+
+  saveRoutine: ({ routine }) => routines.save(routine),
+  removeRoutine: ({ id }) => routines.remove(id),
+  runRoutine: ({ id }) => routines.runNow(id),
 
   refreshEngines: () => {
     void detect()

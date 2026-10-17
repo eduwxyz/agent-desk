@@ -1841,3 +1841,107 @@ table.csv th {
   position: sticky;
   top: 0;
 }
+
+/* ---------- routines ---------- */
+.avatar--routine {
+  background: var(--hover);
+  color: var(--text-2);
+  border-radius: 50%;
+}
+.msg--routine .md {
+  color: var(--text-2);
+}
+.routine-examples {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 10px;
+  margin-top: 12px;
+  width: 100%;
+  text-align: left;
+}
+.routine-example {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--panel);
+  color: var(--text);
+}
+.routine-example:hover:not(:disabled) {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.routines {
+  max-width: 860px;
+}
+.routine {
+  align-items: flex-start;
+  gap: 12px;
+}
+.routine .toggle {
+  margin-top: 2px;
+}
+.routine.is-off .routine__body {
+  opacity: 0.6;
+}
+.routine.is-editing {
+  background: var(--accent-soft);
+}
+.routine__body {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.routine__title,
+.routine__meta {
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.routine__meta .link {
+  gap: 5px;
+  font-size: inherit;
+}
+.routine__prompt {
+  margin: 2px 0 0;
+  color: var(--text-2);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.routine-form {
+  margin-bottom: 20px;
+}
+.routine-form .row {
+  gap: 8px;
+}
+.routine-days {
+  gap: 10px;
+  white-space: nowrap;
+  min-height: 38px;
+}
+.days {
+  display: inline-flex;
+  gap: 4px;
+}
+.days button {
+  display: grid;
+  place-items: center;
+  padding: 0;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--text-2);
+  font-size: 12px;
+  font-weight: 500;
+}
+.days button.is-on {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-text);
+}

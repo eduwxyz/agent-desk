@@ -29,6 +29,7 @@ Usuário do MVP: eu, numa máquina só. Quem baixar o repositório usa do mesmo 
 | **Memória** | Uma nota durável, curta, com origem. **Sobre mim** (vale pra todos os agentes) ou **do agente** (só dele). |
 | **Computador** | Um computador Linux isolado (container Docker) de um agente, persistente, onde ele faz qualquer coisa sem pedir. |
 | **Artefato** | Um arquivo que o agente mostra no chat (print, documento, página, planilha), guardado como estava na hora. |
+| **Rotina** | Um pedido agendado pra um agente (dias + horário), que posta numa conversa e roda sozinho. |
 | **Recibo** | Registro de cada turno: motor, modelo, tokens (in/out/cache/raciocínio), duração e, quando a CLI informa, o custo equivalente em API. |
 
 ## Behaviors
@@ -193,6 +194,21 @@ Cada agente pode ganhar um computador próprio: um Linux isolado dentro do Mac, 
   - página do agente: estado do computador, serviços (abrir, parar), **Abrir pasta**, **Reiniciar** e **Apagar computador** (some tudo, inclusive `/work`).
 - Depois (M5.1): emprestar uma pasta do Mac pro computador do agente, pra ele trabalhar num projeto existente.
 
+### 14. Rotinas (M6)
+
+Até aqui tudo começa com uma mensagem minha. Uma rotina faz o agente trabalhar sozinho, num horário: eu agendo uma vez e o resultado aparece na conversa, como qualquer outra resposta.
+
+- **O que é:** nome, agente, onde postar (a DM com ele ou um canal de que ele participa), o que fazer (texto livre, como eu escreveria numa mensagem), dias da semana e horário. Ligada ou desligada.
+- **Quando roda:** no horário local do Mac. Um agendador no core confere a cada 30 s se alguma rotina venceu, então funciona também depois do Mac acordar.
+- **Rodou perdida:** se o app estava fechado ou o Mac dormindo no horário, a rotina roda **uma vez** quando o app volta, desde que tenha vencido há menos de 12 h, e aparece como atrasada. Mais velha que isso, pula pra próxima. Nunca acumula várias execuções.
+- **Na conversa:** entra uma mensagem da rotina (ícone de relógio, nome e o pedido) e o agente responde em seguida, com tudo que uma resposta tem: ferramentas, computador, prints, memória, @menção de outro agente. O agente sabe que é uma rotina agendada, e que eu posso não estar olhando agora.
+- **Governança igual:** mesmo limite de tokens (checado antes), mesmos grants, e ação sensível vira pedido de aprovação, que espera até eu decidir. Se a mesma rotina ainda está rodando, a próxima execução pula.
+- **Aviso:** quando termina, uma notificação do sistema com o agente, o nome da rotina e o começo da resposta (ou "pediu aprovação", "parou no limite", "falhou"). Clicar abre o app.
+- **Rodar agora**, pra testar, sem mexer no horário.
+- **Tela de Rotinas** (sidebar): cada rotina com agente, quando roda, onde posta, próxima execução e a última (status e link pra conversa). Criar, editar, ligar/desligar, rodar agora, apagar.
+- **Pra rodar sem eu lembrar:** fechar a janela não para as rotinas (o app continua aberto no Dock; só Sair para). Em Configurações, **Abrir ao ligar o Mac** (só no app empacotado).
+- Depois: gatilhos por evento (issue no Linear, e-mail, CI quebrado), intervalos ("a cada 2 h") e ícone na barra de menu.
+
 ## Acceptance criteria
 
 1. **Chat básico:** crio um agente no Claude Code, abro DM, mando uma mensagem e vejo a resposta em streaming, com rodapé de modelo/tokens/duração. O mesmo funciona com um agente no Codex.
@@ -225,6 +241,8 @@ Cada agente pode ganhar um computador próprio: um Linux isolado dentro do Mac, 
 19. **Esquecer (M4):** esqueço uma memória; ela sai do prompt e a consolidação seguinte, sobre as mesmas mensagens, não a recria.
 20. **Computador (M5):** com o computador ligado, peço "cria um dashboard com esses dados e me mostra"; o agente instala o que precisa, sobe o servidor, e eu vejo o print no chat e o app rodando no painel, sem nenhum pedido de aprovação. Um agente sem computador não vê essas ferramentas.
 21. **Isolamento do computador (M5):** um comando do agente não enxerga arquivos do Mac fora de `/work`, nenhuma credencial das CLIs está no container, e as portas só respondem em `127.0.0.1`.
+22. **Rotina (M6):** crio "todo dia às 9:00, Lia, resuma as issues abertas no Linear" no #engenharia. Às 9:00 aparece a mensagem da rotina, a Lia responde e chega uma notificação. Com o app fechado às 9:00 e aberto às 9:40, ela roda uma vez, como atrasada; aberto no dia seguinte, não roda a de ontem.
+23. **Rotina com governança (M6):** uma rotina cujo agente já passou do limite não abre a CLI; uma que pede ação sensível fica esperando aprovação, e a execução seguinte não começa enquanto a anterior roda.
 
 ## Out of scope (MVP)
 
@@ -233,7 +251,7 @@ Cada agente pode ganhar um computador próprio: um Linux isolado dentro do Mac, 
 - Missões de código com Claude Code ou Codex trabalhando num repositório (candidato natural pra v0.2: é só liberar as ferramentas embutidas num diretório escolhido, com aprovação).
 - Sessões persistentes da CLI (`--resume`) como otimização.
 - Streaming token a token no Codex (via `codex app-server`).
-- Rotinas (agendamento e gatilhos por evento).
+- Gatilhos de rotina por evento (as rotinas por horário entraram no M6).
 - Lições e propostas de mudança de instrução (a memória entrou no M4).
 - Busca semântica nas memórias (embeddings).
 - Threads, fórum, wiki, drive, issues, agenda, busca global.
@@ -314,7 +332,9 @@ Cada agente pode ganhar um computador próprio: um Linux isolado dentro do Mac, 
 
 5. **M5, computador do agente (feito):** container por agente, ferramentas `bash`, arquivos, serviços, `screenshot` e `show_file`, artefatos e painel lateral. (AC 20, 21) Testado com o Claude Code real: pedi um dashboard de vendas com gráfico, servido e com print; o Sonnet escreveu, subiu o serviço, tirou o print e respondeu em 15 s, sem nenhum pedido de aprovação. Arquivos são lidos e escritos sempre por dentro do container: um symlink em `/work` apontando pro Mac não alcança o Mac. Codex com computador ainda não testado (depende do login próprio).
 
-O MVP termina quando os cinco estiverem prontos e eu usar o app por uma semana no dia a dia.
+6. **M6, rotinas (feito):** agendador, tela de Rotinas, mensagem de rotina na conversa, notificação ao terminar, abrir ao ligar o Mac. (AC 22, 23) Testado com o Claude Code real: uma rotina na DM da Lia, disparada por Rodar agora, respondeu em 5 s, sem perguntar se podia; a DM é criada ao salvar se ainda não existir. Horário, atraso, pulo após 12 h, uma execução por vez e limite testados com relógio simulado. Abrir ao ligar o Mac só pode ser conferido no app empacotado.
+
+O MVP termina quando os seis estiverem prontos e eu usar o app por uma semana no dia a dia.
 
 ## Riscos
 

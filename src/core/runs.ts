@@ -3,7 +3,7 @@ import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import type { CoreEvent } from '../shared/rpc'
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
-import { ENGINES, modelInfo, type Agent, type Approval, type Connector, type ConnectorTool, type Conversation, type EngineId, type Message, type Receipt, type Run, type RunStatus, type Settings, type Step } from '../shared/types'
+import { describeSchedule, ENGINES, modelInfo, type Agent, type Approval, type Connector, type ConnectorTool, type Conversation, type EngineId, type Message, type Receipt, type Routine, type Run, type RunStatus, type Settings, type Step } from '../shared/types'
 import { HISTORY_LIMIT, mentioned, systemPrompt, transcript } from './context'
 import { LEMBRAR, type Memories } from './memory'
 import { COMPUTER_TOOL_NAMES, COMPUTER_TOOLS, stepFor, type Computers } from './computer'
@@ -41,7 +41,7 @@ export interface RunnerDeps {
   connectors?: Connectors
   memory?: Memories // without it, agents get no memory and see the last HISTORY_LIMIT messages
   computers?: Pick<Computers, 'call'> // without it, no agent has a computer
-  notify?: (title: string, body: string) => void
+  notify?: (title: string, body: string, conversationId?: string) => void
 }
 
 // What the runner needs from the connector manager.
@@ -78,7 +78,7 @@ const clip = (r: CallToolResult): CallToolResult => {
 type Control = { ctl: AbortController; reason?: 'stopped' | 'limit' }
 
 export class Runner {
-  private queue: (() => Promise<void>)[] = []
+  private queue: (() => Promise<unknown>)[] = []
   private active = 0
   private routing = 0
   private controllers = new Map<string, Control>()
@@ -135,6 +135,41 @@ export class Runner {
     const conv = db.conversation(msg.conversationId)
     if (!agent || !conv) return
     this.enqueue(() => this.execute(agent, conv, { depth: msg.run!.depth ?? 1, existing: msg }))
+  }
+
+  // Posts a routine's request in its conversation and runs its agent on it.
+  // Resolves with the agent's reply once that run ends, or undefined when it can't run.
+  async runRoutine(r: Routine, when: { scheduledAt: number; late: boolean }): Promise<Message | undefined> {
+    const { db, emit } = this.deps
+    const conv = db.conversation(r.conversationId)
+    const agent = db.agent(r.agentId)
+    if (!conv || !agent || agent.archived) return undefined
+    const me = (await this.deps.settings()).workspaceName
+
+    const ask: Message = {
+      id: randomUUID(),
+      conversationId: conv.id,
+      author: { kind: 'routine', id: r.id },
+      text: r.prompt.trim(),
+      at: Date.now(),
+      routine: { name: r.name, scheduledAt: when.scheduledAt, late: when.late }
+    }
+    db.saveMessage(ask)
+    emit({ type: 'message', message: ask })
+
+    const hm = new Date(when.scheduledAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+    const task = [
+      `Esta é a rotina "${r.name}" (${describeSchedule(r.schedule).toLowerCase()}), que ${me} agendou pra você${when.late ? `. Era pra ter rodado às ${hm}, mas o app estava fechado` : ''}.`,
+      `${me} pode não estar olhando agora: faça o que a última mensagem pede, do começo ao fim, e responda com o resultado. Só pergunte se for impossível continuar sem ${me}.`
+    ].join(' ')
+    return new Promise((resolve) =>
+      this.enqueue(() =>
+        this.execute(agent, conv, { depth: 1, task }).then(resolve, (e: unknown) => {
+          resolve(undefined)
+          throw e
+        })
+      )
+    )
   }
 
   // Resolves when nothing is routing, running or queued (tests and shutdown).
@@ -205,7 +240,7 @@ export class Runner {
     }
   }
 
-  private enqueue(job: () => Promise<void>): void {
+  private enqueue(job: () => Promise<unknown>): void {
     this.queue.push(job)
     this.pump()
   }
@@ -224,7 +259,7 @@ export class Runner {
     }
   }
 
-  private async execute(agent: Agent, conv: Conversation, opts: { depth: number; existing?: Message; task?: string }): Promise<void> {
+  private async execute(agent: Agent, conv: Conversation, opts: { depth: number; existing?: Message; task?: string }): Promise<Message> {
     const { db, emit, engines } = this.deps
     const settings = await this.deps.settings()
     agent = db.agent(agent.id) ?? agent // limits or instructions may have changed while queued
@@ -249,7 +284,7 @@ export class Runner {
         text: 'Parei: usei todo o meu limite de tokens deste mês. Dá pra aumentar na minha página.',
         run: { status: 'limit_reached', depth: opts.depth, steps: [] }
       })
-      return
+      return msg
     }
 
     const status = settings.engines[engineId]
@@ -262,7 +297,7 @@ export class Runner {
           error: `O ${ENGINES[engineId].label} ${status.installed ? 'não está logado' : 'não está instalado'}. Resolva em Configurações e mande de novo.`
         }
       })
-      return
+      return msg
     }
 
     save()
@@ -410,7 +445,7 @@ export class Runner {
           emit({ type: 'approval', approval })
           msg.run = { ...msg.run!, approvalId: approval.id }
           addSteps({ id: randomUUID(), label: 'Pediu aprovação', detail, status: 'done' })
-          this.deps.notify?.(`${agent.name} pede aprovação`, `${detail}${approval.why ? `: ${approval.why}` : ''}`)
+          this.deps.notify?.(`${agent.name} pede aprovação`, `${detail}${approval.why ? `: ${approval.why}` : ''}`, conv.id)
           return textResult(
             `Pedido de aprovação criado. A ação ainda NÃO foi executada. Encerre sua resposta agora dizendo em uma frase o que pediu. Quando ${settings.workspaceName} decidir, você recebe o resultado numa nova mensagem.`
           )
@@ -506,6 +541,7 @@ export class Runner {
     const updated = db.agent(agent.id)
     if (updated) emit({ type: 'agent', agent: updated })
     void memory?.consolidate(conv.id)
+    return msg
   }
 
   // The first decision wins. Approving runs exactly the stored call (after

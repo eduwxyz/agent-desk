@@ -122,7 +122,8 @@ function MessageList({ messages, conversationId }: { messages: Message[]; conver
           (m.author.kind !== 'agent' || (prev.author.kind === 'agent' && prev.author.id === m.author.id)) &&
           m.at - prev.at < 5 * 60_000 &&
           !m.run &&
-          m.author.kind !== 'system'
+          m.author.kind !== 'system' &&
+          m.author.kind !== 'routine'
         return <MessageRow key={m.id} message={m} grouped={grouped} />
       })}
     </div>
@@ -143,6 +144,8 @@ function MessageRow({ message, grouped }: { message: Message; grouped: boolean }
       </div>
     )
   }
+
+  if (message.author.kind === 'routine') return <RoutineMessage message={message} />
 
   const name = agent ? agent.name : me.name
   return (
@@ -196,6 +199,38 @@ function MessageRow({ message, grouped }: { message: Message; grouped: boolean }
           </button>
         )}
         {message.run?.receipt && <ReceiptLine receipt={message.run.receipt} />}
+      </div>
+    </article>
+  )
+}
+
+// What a routine asked, posted at its time; the agent's reply comes next.
+function RoutineMessage({ message }: { message: Message }): ReactNode {
+  const exists = useStore((s) => s.routines.some((r) => message.author.kind === 'routine' && r.id === message.author.id))
+  const info = message.routine
+  return (
+    <article className="msg msg--routine">
+      <div className="msg__gutter">
+        <span className="avatar avatar--routine" style={{ width: 34, height: 34 }}>
+          <Icon name="clock" size={17} />
+        </span>
+      </div>
+      <div className="msg__body">
+        <div className="msg__head">
+          {exists ? (
+            <button className="msg__author link" onClick={() => navigate({ kind: 'routines' })}>
+              {info?.name ?? 'Rotina'}
+            </button>
+          ) : (
+            <span className="msg__author">{info?.name ?? 'Rotina'}</span>
+          )}
+          <span className="tag">rotina</span>
+          {info?.late && <span className="tag tag--warn">atrasada · era {time(info.scheduledAt)}</span>}
+          <span className="msg__time">{time(message.at)}</span>
+        </div>
+        <div className="md">
+          <Markdown remarkPlugins={[remarkGfm]}>{highlightMentions(message.text)}</Markdown>
+        </div>
       </div>
     </article>
   )

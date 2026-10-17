@@ -17,6 +17,8 @@ import {
   type MemoryScope,
   type Message,
   type Model,
+  type Routine,
+  type RoutineInput,
   type Settings
 } from '../../shared/types'
 import { call, connect } from './rpc'
@@ -31,6 +33,7 @@ export type View =
   | { kind: 'usage' }
   | { kind: 'connectors' }
   | { kind: 'memory' }
+  | { kind: 'routines' }
   | { kind: 'settings' }
 
 export interface State {
@@ -47,6 +50,8 @@ export interface State {
   memories: Memory[]
   artifacts: Artifact[]
   computers: ComputerInfo[]
+  routines: Routine[]
+  packaged: boolean
   panel: Panel | null // the side panel next to a conversation
   demoServer?: { command: string; args: string[] }
 }
@@ -85,6 +90,8 @@ let state: State = {
   memories: [],
   artifacts: [],
   computers: [],
+  routines: [],
+  packaged: false,
   panel: null
 }
 
@@ -146,7 +153,7 @@ function apply(e: CoreEvent): void {
         const known = s.messages.some((m) => m.id === e.message.id)
         const viewing = s.view?.kind === 'conversation' && s.view.id === e.message.conversationId
         const conversations =
-          !known && !viewing && e.message.author.kind === 'agent'
+          !known && !viewing && (e.message.author.kind === 'agent' || e.message.author.kind === 'routine')
             ? s.conversations.map((c) => (c.id === e.message.conversationId ? { ...c, unread: (c.unread ?? 0) + 1 } : c))
             : s.conversations
         return { ...s, conversations, messages: upsert(s.messages, e.message) }
@@ -177,11 +184,16 @@ function apply(e: CoreEvent): void {
         const others = s.computers.filter((c) => c.agentId !== e.computer.agentId)
         return { ...s, computers: [...others, e.computer] }
       }
+      case 'routine':
+        return { ...s, routines: upsert(s.routines, e.routine) }
+      case 'routine_removed':
+        return { ...s, routines: s.routines.filter((r) => r.id !== e.id) }
     }
   })
 }
 
 export async function start(): Promise<void> {
+  window.agentDesk.onNavigate((id) => navigate({ kind: 'conversation', id }))
   await connect(apply)
   const snap = await call('snapshot')
   set((s) => {
@@ -199,6 +211,8 @@ export async function start(): Promise<void> {
       memories: snap.memories,
       artifacts: snap.artifacts,
       computers: snap.computers,
+      routines: snap.routines,
+      packaged: snap.packaged,
       demoServer: snap.demoServer
     }
   })
@@ -314,3 +328,9 @@ export const computerAction = (agentId: string, action: 'start' | 'restart' | 'e
   void call('computerAction', { agentId, action })
 export const stopService = (agentId: string, name: string): void => void call('stopService', { agentId, name })
 export const openExternal = (url: string): void => void call('openExternal', { url })
+
+export const saveRoutine = (routine: RoutineInput): Promise<Routine> => call('saveRoutine', { routine })
+export const removeRoutine = (id: string): void => void call('removeRoutine', { id })
+export const runRoutine = (id: string): void => void call('runRoutine', { id })
+// The id of the DM with an agent, created if it doesn't exist yet, without opening it.
+export const dmWith = (agentId: string): Promise<string> => call('openDm', { agentId })

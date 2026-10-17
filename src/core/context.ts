@@ -74,6 +74,7 @@ export function transcript(opts: { agent: Agent; conversation: Conversation; mes
   const name = (m: Message): string | null => {
     if (m.author.kind === 'me') return me
     if (m.author.kind === 'system') return null
+    if (m.author.kind === 'routine') return `Rotina "${m.routine?.name ?? 'apagada'}", agendada por ${me}`
     const id = m.author.id
     const a = agents.find((x) => x.id === id)
     return a ? `${a.name}${a.id === agent.id ? ' (você)' : ''} · agente` : 'agente removido'

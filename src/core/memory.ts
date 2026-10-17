@@ -49,7 +49,11 @@ type Op = { op: 'add'; text: string; evidence: number[] } | { op: 'update'; id: 
 export function consolidationPrompt(opts: { summary?: string; messages: Message[]; me: string; agents: Agent[]; memories: Memory[]; forgotten: Memory[] }): string {
   const { summary, messages, me, agents, memories, forgotten } = opts
   const author = (m: Message): string =>
-    m.author.kind === 'me' ? me : `${agents.find((a) => m.author.kind === 'agent' && a.id === m.author.id)?.name ?? 'agente'} · agente`
+    m.author.kind === 'me'
+      ? me
+      : m.author.kind === 'routine'
+        ? `rotina agendada por ${me}`
+        : `${agents.find((a) => m.author.kind === 'agent' && a.id === m.author.id)?.name ?? 'agente'} · agente`
   return [
     'Resumo atual:',
     summary?.trim() || '(ainda não há)',

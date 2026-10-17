@@ -478,7 +478,7 @@ function ComputerCard({ agentId, on, onToggle }: { agentId: string; on: boolean;
   )
 }
 
-function Card({ title, lead, action, children }: { title: string; lead?: string; action?: ReactNode; children: ReactNode }): ReactNode {
+export function Card({ title, lead, action, children }: { title: string; lead?: string; action?: ReactNode; children: ReactNode }): ReactNode {
   return (
     <div className="card">
       <div className="card__head">
@@ -493,7 +493,7 @@ function Card({ title, lead, action, children }: { title: string; lead?: string;
   )
 }
 
-function Field({ label, hint, error, children }: { label: string; hint?: string; error?: string | null; children: ReactNode }): ReactNode {
+export function Field({ label, hint, error, children }: { label: string; hint?: string; error?: string | null; children: ReactNode }): ReactNode {
   return (
     <label className={`field ${error ? 'has-error' : ''}`}>
       <span className="field__label">{label}</span>
@@ -917,7 +917,7 @@ function AddConnector({ onDone }: { onDone: (id?: string) => void }): ReactNode 
   )
 }
 
-function Toggle({ on, onChange }: { on: boolean; onChange: (v: boolean) => void }): ReactNode {
+export function Toggle({ on, onChange }: { on: boolean; onChange: (v: boolean) => void }): ReactNode {
   return <button className={`toggle ${on ? 'is-on' : ''}`} role="switch" aria-checked={on} onClick={() => onChange(!on)} />
 }
 
@@ -925,6 +925,7 @@ function Toggle({ on, onChange }: { on: boolean; onChange: (v: boolean) => void 
 
 export function SettingsPage(): ReactNode {
   const settings = useStore((s) => s.settings)
+  const packaged = useStore((s) => s.packaged)
   const models = useStore((s) => s.models)
   return (
     <Page title="Configurações">
@@ -1011,6 +1012,17 @@ export function SettingsPage(): ReactNode {
                 <option value="off">Nada (só resume)</option>
               </select>
             </Field>
+          </div>
+        </Card>
+
+        <Card title="Rotinas" lead="As rotinas rodam enquanto o app está aberto, mesmo com a janela fechada.">
+          <div className="key-row">
+            <Icon name="clock" />
+            <div className="grow">
+              <strong>Abrir ao ligar o Mac</strong>
+              <p className="muted small">{packaged ? 'Assim nenhuma rotina depende de você lembrar de abrir o app.' : 'Só no app instalado. Rodando com npm run dev, fica desligado.'}</p>
+            </div>
+            <Toggle on={!!settings.openAtLogin && packaged} onChange={(v) => packaged && updateSettings({ openAtLogin: v })} />
           </div>
         </Card>
 

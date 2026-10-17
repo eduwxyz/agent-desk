@@ -173,6 +173,21 @@ if (await open.count()) {
   await shot('23-painel-servico')
 }
 
+// ---------- M6: routines ----------
+
+await win.click('.nav-item:has-text("Rotinas")')
+await shot('24-rotinas-vazio')
+await win.click('.routine-example:has-text("Fechamento da semana")')
+await win.locator('.routine-form select').nth(1).selectOption({ label: '#engenharia' })
+await shot('25-rotina-nova')
+await win.click('button:has-text("Criar rotina")')
+await win.click('.routine button:has-text("Rodar agora")')
+await win.waitForSelector('.routine .tag:text-is("respondeu")', { timeout: 120_000 })
+await shot('26-rotinas')
+await win.click('.routine button.link:text-is("ver")')
+await settle()
+await shot('27-rotina-na-conversa')
+
 console.log(errors.length ? `ERRORS:\n${errors.join('\n')}` : 'no console errors')
 console.log(`data: ${data}`)
 await app.close()

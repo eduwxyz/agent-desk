@@ -14,7 +14,7 @@ let core: UtilityProcess | null = null
 function startCore(): UtilityProcess {
   const child = utilityProcess.fork(join(import.meta.dirname, 'core.js'), [], {
     serviceName: 'agent-desk-core',
-    env: { ...process.env, AGENT_DESK_DATA: dataDir() }
+    env: { ...process.env, AGENT_DESK_DATA: dataDir(), AGENT_DESK_PACKAGED: app.isPackaged ? '1' : '0' }
   })
   child.on('message', (msg: CoreRequest) => handleCore(child, msg))
   child.on('exit', (code) => {
@@ -28,7 +28,8 @@ type CoreRequest =
   | { type: 'secret'; id: string; op: 'encrypt' | 'decrypt'; data: string }
   | { type: 'open'; url: string }
   | { type: 'open_path'; path: string }
-  | { type: 'notify'; title: string; body: string }
+  | { type: 'notify'; title: string; body: string; conversationId?: string }
+  | { type: 'login_item'; open: boolean }
   | { type: 'screenshot'; id: string; url: string; width: number; height: number; fullPage: boolean }
 
 // Things the core can't do itself: the OS keychain, the browser, notifications.
@@ -48,7 +49,13 @@ function handleCore(child: UtilityProcess, msg: CoreRequest): void {
     // Only folders the app keeps (an agent's computer), never an arbitrary path.
     if (normalize(msg.path).startsWith(join(dataDir(), 'computers') + sep)) void shell.openPath(msg.path)
   } else if (msg.type === 'notify') {
-    if (Notification.isSupported()) new Notification({ title: msg.title, body: msg.body }).show()
+    if (!Notification.isSupported()) return
+    const n = new Notification({ title: msg.title, body: msg.body })
+    n.on('click', () => showWindow(msg.conversationId))
+    n.show()
+  } else if (msg.type === 'login_item') {
+    // Only the installed app: in dev this would register the bare Electron binary.
+    if (app.isPackaged) app.setLoginItemSettings({ openAtLogin: msg.open })
   } else if (msg.type === 'screenshot') {
     screenshot(msg).then(
       (png) => child.postMessage({ type: 'screenshot-result', id: msg.id, data: png.toString('base64') }),
@@ -109,7 +116,20 @@ ipcMain.on('core:connect', (event) => {
   event.sender.postMessage('core:port', null, [port2])
 })
 
-function createWindow(): void {
+// Brings the window back (closing it keeps the app and its routines running),
+// optionally opening a conversation.
+function showWindow(conversationId?: string): void {
+  const win = BrowserWindow.getAllWindows()[0] ?? createWindow()
+  if (win.isMinimized()) win.restore()
+  win.show()
+  win.focus()
+  if (!conversationId) return
+  const go = (): void => win.webContents.send('navigate', conversationId)
+  if (win.webContents.isLoading()) win.webContents.once('did-finish-load', go)
+  else go()
+}
+
+function createWindow(): BrowserWindow {
   const win = new BrowserWindow({
     width: 1280,
     height: 820,
@@ -142,6 +162,7 @@ function createWindow(): void {
   } else {
     void win.loadFile(join(import.meta.dirname, '../renderer/index.html'))
   }
+  return win
 }
 
 app.whenReady().then(() => {

@@ -8,5 +8,9 @@ ipcRenderer.on('core:port', (event) => {
 })
 
 contextBridge.exposeInMainWorld('agentDesk', {
-  connect: (): void => ipcRenderer.send('core:connect')
+  connect: (): void => ipcRenderer.send('core:connect'),
+  // A click on a notification opens its conversation.
+  onNavigate: (cb: (conversationId: string) => void): void => {
+    ipcRenderer.on('navigate', (_e, id: unknown) => typeof id === 'string' && cb(id))
+  }
 })

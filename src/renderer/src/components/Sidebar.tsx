@@ -61,6 +61,7 @@ export function Sidebar(): ReactNode {
       <nav className="sidebar__scroll">
         <NavItem view={{ kind: 'approvals' }} icon="shield" label="Aprovações" badge={pending} />
         <NavItem view={{ kind: 'memory' }} icon="book" label="Memória" badge={suggestions} />
+        <NavItem view={{ kind: 'routines' }} icon="clock" label="Rotinas" />
 
         <div className="section">
           <div className="section__head">

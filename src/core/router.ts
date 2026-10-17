@@ -33,7 +33,8 @@ export function routerPrompt(opts: { messages: Message[]; agents: Agent[]; me: s
     .filter((m) => m.text.trim() && m.author.kind !== 'system')
     .slice(-ROUTER_HISTORY)
     .map((m) => {
-      const author = m.author.kind === 'me' ? me : (agents.find((a) => m.author.kind === 'agent' && a.id === m.author.id)?.name ?? 'agente')
+      const author =
+        m.author.kind === 'me' ? me : m.author.kind === 'routine' ? `rotina de ${me}` : (agents.find((a) => m.author.kind === 'agent' && a.id === m.author.id)?.name ?? 'agente')
       return `[${author}] ${m.text.trim().slice(0, 600)}`
     })
   return ['Agentes no canal:', ...roster, '', 'Conversa (a última é a que precisa de resposta):', ...lines, '', 'Responda só com o JSON.'].join('\n')
