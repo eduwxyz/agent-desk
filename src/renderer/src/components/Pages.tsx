@@ -7,6 +7,7 @@ import {
   openDm,
   refreshEngines,
   saveAgent,
+  setGrant,
   addConnector,
   authorizeConnector,
   reconnectConnector,
@@ -66,6 +67,7 @@ export function AgentPage({ id }: { id?: string }): ReactNode {
   const [draft, setDraft] = useState<Agent>(() => existing ?? newAgentDraft())
   const [chosen, setChosen] = useState<string[]>(() => (id ? channels.filter((c) => c.members.includes(id)).map((c) => c.id) : []))
   const [saved, setSaved] = useState(false)
+  const [grantSaved, setGrantSaved] = useState<string | null>(null)
 
   useEffect(() => {
     if (existing) {
@@ -185,7 +187,10 @@ export function AgentPage({ id }: { id?: string }): ReactNode {
             <p className="hint">Fora desses canais, chame com @{draft.handle || 'handle'} ou mande DM.</p>
           </Card>
 
-          <Card title="Ferramentas e acesso" lead="Um nível por conector. O que fica de fora nem aparece pro modelo.">
+          <Card
+            title="Ferramentas e acesso"
+            lead={`Um nível por conector. O que fica de fora nem aparece pro modelo.${isNew ? '' : ' Muda na hora, sem precisar salvar.'}`}
+          >
             {connectors.length === 0 && (
               <p className="muted small">
                 Nenhum conector ainda.{' '}
@@ -203,7 +208,9 @@ export function AgentPage({ id }: { id?: string }): ReactNode {
                     <div className="grant__name">
                       <Icon name={c.kind === 'stdio' ? 'terminal' : 'globe'} />
                       <div>
-                        <strong>{c.name}</strong>
+                        <strong>
+                          {c.name} {grantSaved === c.id && <span className="saved">Salvo</span>}
+                        </strong>
                         <span className="muted small">
                           {level === 'none'
                             ? 'Nenhuma ferramenta exposta'
@@ -218,7 +225,13 @@ export function AgentPage({ id }: { id?: string }): ReactNode {
                         <button
                           key={l.value}
                           className={level === l.value ? 'is-active' : ''}
-                          onClick={() => patch({ grants: { ...draft.grants, [c.id]: l.value } })}
+                          onClick={() => {
+                            // Access changes take effect right away for existing agents; no Save needed.
+                            if (isNew) return patch({ grants: { ...draft.grants, [c.id]: l.value } })
+                            setDraft((d) => ({ ...d, grants: { ...d.grants, [c.id]: l.value } }))
+                            setGrant(draft.id, c.id, l.value)
+                            setGrantSaved(c.id)
+                          }}
                         >
                           {l.label}
                         </button>
