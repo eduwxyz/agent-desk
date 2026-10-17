@@ -19,6 +19,13 @@ export function fakeEngine(id: Engine['id'], opts: { delayMs?: number; reply?: (
         reply = opts.reply(turn)
       } else if (/pe[çc]a pr[oa] (\w+)/i.test(last)) {
         reply = `@${/pe[çc]a pr[oa] (\w+)/i.exec(last)![1]!.toLowerCase()}, pode ajudar aqui?`
+      } else if (turn.mcpUrl && /(lista|liste|mostra|quais).*tarefas/i.test(last)) {
+        const r = await callTool(turn.mcpUrl, await toolNamed(turn.mcpUrl, 'list_tasks'), {})
+        reply = `Suas tarefas:\n\n${textOf(r)}`
+      } else if (turn.mcpUrl && /apag\w* a tarefa (\d+)/i.test(last)) {
+        const id = Number(/apag\w* a tarefa (\d+)/i.exec(last)![1])
+        await callTool(turn.mcpUrl, await toolNamed(turn.mcpUrl, 'delete_task'), { id, _motivo: 'Você pediu pra apagar.' })
+        reply = `Pedi sua aprovação pra apagar a tarefa #${id}.`
       } else if (/pergunt/i.test(last) && turn.mcpUrl) {
         await callTool(turn.mcpUrl, 'ask_user', { question: 'Pra quando você precisa disso?' })
         reply = 'Te mandei uma pergunta.'
@@ -64,6 +71,19 @@ function fakeRoute(prompt: string): { handles: string[]; reason: string } {
   const fit = roster.find((r) => ROLE_WORDS.some(([role, words]) => role.test(r.about) && words.test(last)))
   const pick = fit ?? roster[0]
   return pick ? { handles: [pick.handle], reason: fit ? 'assunto da área dele' : 'primeiro do canal' } : { handles: [], reason: 'sem agentes' }
+}
+
+const textOf = (r: unknown): string => ((r as { content?: { text?: string }[] }).content ?? []).map((c) => c.text ?? '').join('\n')
+
+// The gateway prefixes tools with the connector name; find one by its own name.
+async function toolNamed(url: string, suffix: string): Promise<string> {
+  const client = new Client({ name: 'fake-engine', version: '0.0.0' })
+  await client.connect(new StreamableHTTPClientTransport(new URL(url)))
+  try {
+    return (await client.listTools()).tools.find((t) => t.name.endsWith(`__${suffix}`))?.name ?? suffix
+  } finally {
+    await client.close()
+  }
 }
 
 export async function callTool(url: string, name: string, args: Record<string, unknown>): Promise<unknown> {

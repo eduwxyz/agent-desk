@@ -1,37 +1,23 @@
-// Renderer state. Agents, conversations, messages and settings come from the
-// core and are kept in sync by its events; actions go to the core over RPC.
-// Connectors and approvals are still sample data until the gateway exists (M3).
+// Renderer state. Everything except the current view comes from the core and
+// is kept in sync by its events; actions go to the core over RPC.
 import { useRef, useSyncExternalStore } from 'react'
 import type { CoreEvent } from '../../shared/rpc'
-import { MODELS, type Agent, type Conversation, type GrantLevel, type Message, type Model, type Settings, type ToolClass } from '../../shared/types'
+import {
+  MODELS,
+  type Agent,
+  type Approval,
+  type Connector,
+  type ConnectorInput,
+  type ConnectorTool,
+  type Conversation,
+  type GrantLevel,
+  type Message,
+  type Model,
+  type Settings
+} from '../../shared/types'
 import { call, connect } from './rpc'
 
 export * from '../../shared/types'
-
-export interface Connector {
-  id: string
-  name: string
-  kind: 'remote' | 'stdio'
-  address: string
-  status: 'connected' | 'needs_reconnect'
-  tools: { name: string; cls: ToolClass; enabled: boolean; highRisk?: boolean }[]
-}
-
-export interface Approval {
-  id: string
-  agentId: string
-  conversationId: string
-  title: string
-  tool: string
-  connector: string
-  args: Record<string, string | number>
-  why: string
-  highRisk: boolean
-  state: 'pending' | 'approved' | 'refused' | 'expired'
-  reason?: string
-  decidedAt?: number
-  createdAt: number
-}
 
 export type View =
   | { kind: 'conversation'; id: string }
@@ -53,57 +39,8 @@ export interface State {
   conversations: Conversation[]
   messages: Message[]
   approvals: Approval[]
+  demoServer?: { command: string; args: string[] }
 }
-
-const SAMPLE_CONNECTORS: Connector[] = [
-  {
-    id: 'github',
-    name: 'GitHub',
-    kind: 'remote',
-    address: 'https://api.githubcopilot.com/mcp/',
-    status: 'connected',
-    tools: [
-      { name: 'search_code', cls: 'read', enabled: true },
-      { name: 'get_pull_request', cls: 'read', enabled: true },
-      { name: 'list_issues', cls: 'read', enabled: true },
-      { name: 'create_branch', cls: 'write', enabled: true },
-      { name: 'create_pull_request', cls: 'write', enabled: true },
-      { name: 'merge_pull_request', cls: 'sensitive', enabled: true, highRisk: true },
-      { name: 'run_workflow', cls: 'sensitive', enabled: true, highRisk: true }
-    ]
-  },
-  {
-    id: 'sentry',
-    name: 'Sentry',
-    kind: 'remote',
-    address: 'https://mcp.sentry.dev/mcp',
-    status: 'connected',
-    tools: [
-      { name: 'search_issues', cls: 'read', enabled: true },
-      { name: 'get_issue_details', cls: 'read', enabled: true },
-      { name: 'update_issue', cls: 'write', enabled: true }
-    ]
-  },
-  {
-    id: 'linear',
-    name: 'Linear',
-    kind: 'remote',
-    address: 'https://mcp.linear.app/mcp',
-    status: 'needs_reconnect',
-    tools: [
-      { name: 'list_issues', cls: 'read', enabled: true },
-      { name: 'create_issue', cls: 'write', enabled: true }
-    ]
-  },
-  {
-    id: 'postgres',
-    name: 'Postgres (métricas)',
-    kind: 'stdio',
-    address: 'npx @modelcontextprotocol/server-postgres postgres://localhost/metrics',
-    status: 'connected',
-    tools: [{ name: 'query', cls: 'read', enabled: true }]
-  }
-]
 
 const initials = (name: string): string =>
   name
@@ -123,11 +60,12 @@ let state: State = {
     engines: { claude: { installed: false, loggedIn: false }, codex: { installed: false, loggedIn: false } },
     routerModel: 'haiku',
     defaultLimit: 2_000_000,
+    approvalTtlHours: 24,
     theme: 'system'
   },
   models: MODELS,
   agents: [],
-  connectors: SAMPLE_CONNECTORS,
+  connectors: [],
   conversations: [],
   messages: [],
   approvals: []
@@ -206,6 +144,12 @@ function apply(e: CoreEvent): void {
       }
       case 'settings':
         return withSettings(s, e.settings)
+      case 'connector':
+        return { ...s, connectors: upsert(s.connectors, e.connector) }
+      case 'connector_removed':
+        return { ...s, connectors: s.connectors.filter((c) => c.id !== e.id) }
+      case 'approval':
+        return { ...s, approvals: upsert(s.approvals, e.approval) }
     }
   })
 }
@@ -216,7 +160,17 @@ export async function start(): Promise<void> {
   set((s) => {
     const first = snap.conversations.find((c) => c.kind === 'channel') ?? snap.conversations[0]
     const view = s.view ?? (first ? { kind: 'conversation' as const, id: first.id } : { kind: 'new-agent' as const })
-    return { ...withSettings(s, snap.settings), ready: true, view, agents: snap.agents, conversations: snap.conversations, messages: snap.messages }
+    return {
+      ...withSettings(s, snap.settings),
+      ready: true,
+      view,
+      agents: snap.agents,
+      conversations: snap.conversations,
+      messages: snap.messages,
+      connectors: snap.connectors,
+      approvals: snap.approvals,
+      demoServer: snap.demoServer
+    }
   })
 }
 
@@ -287,14 +241,13 @@ export function setGrant(agentId: string, connectorId: string, level: GrantLevel
   void saveAgent({ ...agent, grants: { ...agent.grants, [connectorId]: level } }, channelIds)
 }
 
-export function setToolClass(connectorId: string, toolName: string, patch: Partial<Connector['tools'][number]>): void {
-  set((s) => ({
-    ...s,
-    connectors: s.connectors.map((c) =>
-      c.id === connectorId ? { ...c, tools: c.tools.map((t) => (t.name === toolName ? { ...t, ...patch } : t)) } : c
-    )
-  }))
-}
+export const updateTool = (connectorId: string, name: string, patch: Partial<Pick<ConnectorTool, 'cls' | 'enabled' | 'highRisk'>>): void =>
+  void call('updateTool', { connectorId, name, patch })
+
+export const addConnector = (input: ConnectorInput): Promise<string> => call('addConnector', { input })
+export const removeConnector = (id: string): void => void call('removeConnector', { id })
+export const reconnectConnector = (id: string): void => void call('reconnectConnector', { id })
+export const authorizeConnector = (id: string): void => void call('authorizeConnector', { id })
 
 export const sendMessage = (conversationId: string, text: string): void => {
   if (text.trim()) void call('sendMessage', { conversationId, text })
@@ -303,10 +256,5 @@ export const sendMessage = (conversationId: string, text: string): void => {
 export const stopRun = (messageId: string): void => void call('stopRun', { messageId })
 export const retryRun = (messageId: string): void => void call('retryRun', { messageId })
 
-// Approvals arrive with the gateway in M3; until then there are none to decide.
-export function decideApproval(id: string, decision: 'approved' | 'refused', reason?: string): void {
-  set((s) => ({
-    ...s,
-    approvals: s.approvals.map((a) => (a.id === id && a.state === 'pending' ? { ...a, state: decision, reason, decidedAt: Date.now() } : a))
-  }))
-}
+export const decideApproval = (id: string, decision: 'approved' | 'refused', reason?: string): void =>
+  void call('decideApproval', { id, decision, reason })

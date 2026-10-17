@@ -72,8 +72,9 @@ Expostas pelo gateway, como qualquer outra. Todas as demais vêm de conectores M
 ### 5. Motores
 
 - **Claude Code:** `claude -p --output-format stream-json --verbose --include-partial-messages`, com `--model`, `--system-prompt`, `--tools ""` (nenhuma ferramenta embutida: sem shell, sem arquivos), `--strict-mcp-config --mcp-config <gateway>`, `--setting-sources ""` (ignora hooks, plugins e configurações do usuário) e `--no-session-persistence`. Não usar `--bare`, que desliga o login por assinatura.
-- **Codex:** `codex exec --json --ephemeral --ignore-user-config --ignore-rules --skip-git-repo-check -s read-only -C <diretório vazio do run>`, com `-m` e `-c model_reasoning_effort=…`, e o gateway como único servidor MCP via `-c mcp_servers…`. O shell embutido do Codex fica preso a um diretório vazio e somente leitura. Desligá-lo de vez é a validar.
-- O app **nunca** toca em credenciais: não lê, não guarda, não repassa token. O login acontece no fluxo da própria CLI (`claude` / `codex login`), que o app abre num Terminal.
+- **Codex:** `codex exec --json --ephemeral --ignore-user-config --ignore-rules --skip-git-repo-check -s read-only -C <diretório vazio do run>`, com `-m`, `-c model_reasoning_effort=…`, skills, busca na web e docs de projeto desligados, `--disable` em cada recurso embutido (shell, exec, plugins, apps, navegador, computer use, multiagente, imagens, memórias, hooks) e o gateway como único servidor MCP via `-c mcp_servers…` com `default_tools_approval_mode="approve"` (quem decide é o gateway).
+- **O Codex roda com um home próprio do app** (`HOME` e `CODEX_HOME` numa pasta do agent-desk). Medido com `codex debug prompt-input`: com o home do usuário, mesmo com `--ignore-user-config`, ele carrega o `~/.codex/AGENTS.md` e as skills do usuário, e num teste real usou o shell pra rodar uma ferramenta pessoal. Por isso o usuário faz um login próprio do Codex pro agent-desk, pelo fluxo do próprio Codex, uma vez.
+- O app **nunca** toca em credenciais: não lê, não guarda, não repassa token. O login acontece no fluxo da própria CLI (`claude auth login` / `codex login`), que o app abre num Terminal.
 - Configurações mostra, por motor: instalado (caminho e versão), logado (`claude auth status`, `codex login status`) e o tipo de login. Se a CLI estiver logada com chave de API em vez de assinatura, o app avisa.
 - Cada motor fica atrás de uma interface própria `Engine` (`run(turno) → stream de EngineEvent`), com uma implementação fake pros testes.
 - Medido nesta máquina (Claude Code 2.1.286, Codex 0.153.4): resposta curta em ~5 s no Claude Code com Haiku e ~4 s no Codex com Luna, já isolado da configuração do usuário (sem isolar, o Codex levou 12 s carregando MCPs e plugins).
@@ -244,11 +245,13 @@ Expostas pelo gateway, como qualquer outra. Todas as demais vêm de conectores M
 0. **M0, interface navegável (feito):** todas as telas com dados simulados e um agente fake que responde em streaming.
 1. **M1, núcleo do chat (feito):** casca Electron + core + RPC, SQLite, agentes, canais/DMs, motores Claude Code e Codex, streaming, recibos e limites. (AC 1, 8, 9, 12, 13, 14) Em canal com mais de um agente, até o router chegar, só responde quem for @mencionado. AC 12 ainda não foi medido com 4 runs e resposta de 2 MB.
 2. **M2, quem responde (feito):** router, menções, anti-loop, fila de runs, `ask_user`, retomada. (AC 2, 3, 4, 11) O gateway entrou aqui, com `ask_user` como primeira ferramenta, pra validar cedo que as duas CLIs usam ferramentas do app. "Retomar" refaz a resposta inteira no lugar (não há passo a passo pra continuar enquanto não houver ferramentas de conector).
-3. **M3, governança de ferramentas:** conectores MCP plugados no gateway, classificação, grants, aprovações. (AC 5, 6, 7, 10)
+3. **M3, governança de ferramentas (feito):** conectores MCP plugados no gateway, classificação, grants, aprovações. (AC 5, 6, 7, 10) Testado de ponta a ponta com o servidor de demonstração (`scripts/demo-mcp-server.mjs`) e o Claude Code real. Falta validar o OAuth com um provedor real (Linear) e o Codex real com conectores, que depende do login próprio.
 
 O MVP termina quando os três estiverem prontos e eu usar o app por uma semana no dia a dia.
 
 ## Riscos
+
+- **Isolamento das CLIs** depende de flags e recursos que mudam entre versões (o Codex ganhou dezenas de recursos ligados por padrão). Mitigação: home próprio pro Codex, `--tools ""` e `--setting-sources ""` no Claude Code, e um teste que pergunta ao modelo quais ferramentas e instruções ele vê, rodado a cada atualização das CLIs.
 
 - **Termos de uso.** A Anthropic permite rodar o Claude Code original logado com a assinatura do próprio usuário, mas proíbe apps que usem o token da assinatura direto ou que ofereçam "entrar com Claude". O app fica do lado permitido: chama a CLI sem modificá-la e nunca toca em credenciais. Os limites do Pro/Max assumem uso individual normal. A OpenAI é mais aberta com o Codex. Rever se as regras mudarem.
 - **Formato do stream das CLIs** pode mudar entre versões. Mitigação: parser tolerante, saídas gravadas como fixtures de teste e versão mínima conferida em Configurações.

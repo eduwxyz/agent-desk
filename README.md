@@ -4,7 +4,7 @@ App desktop (Electron) onde você conversa com um time de agentes de IA em canai
 
 Os agentes rodam nas CLIs que você já usa, com a sua assinatura: [Claude Code](https://code.claude.com) (`claude`) e [Codex](https://github.com/openai/codex) (`codex`). Sem chave de API e sem cobrança por uso. O app nunca vê nem guarda suas credenciais.
 
-Status: **M2, quem responde.** Agentes respondem em canais e DMs pelo Claude Code ou pelo Codex, com streaming, recibos e limite de tokens por agente, tudo salvo em SQLite. Sem menção, um router escolhe quem responde. Agentes passam a vez uns pros outros com @menção (até 3 seguidas), podem te fazer uma pergunta e respostas que falharam podem ser refeitas. Conectores e aprovações na interface ainda são dados de exemplo (M3). Spec do MVP em [`docs/spec-mvp.md`](docs/spec-mvp.md).
+Status: **M3, governança de ferramentas.** Agentes respondem em canais e DMs pelo Claude Code ou pelo Codex, com streaming, recibos e limite de tokens por agente. Sem menção, um router escolhe quem responde; agentes passam a vez uns pros outros com @menção e podem te fazer perguntas. Conectores MCP (remotos com OAuth ou token, e locais via stdio) entram por um gateway: cada agente só vê as ferramentas que recebeu, e ações sensíveis viram pedidos de aprovação amarrados à chamada exata. Spec do MVP em [`docs/spec-mvp.md`](docs/spec-mvp.md).
 
 ## Rodar
 
@@ -12,8 +12,11 @@ Precisa do Node 24+ e de pelo menos uma das CLIs instalada e logada na sua assin
 
 ```bash
 claude auth login   # Claude Code
-codex login         # Codex
 ```
+
+O Codex roda com um home próprio do agent-desk (pra não carregar suas skills, AGENTS.md e plugins), então o login dele é feito pelo botão **Entrar** em Configurações, uma vez.
+
+Pra testar conectores sem conta nenhuma, use o servidor de demonstração (`scripts/demo-mcp-server.mjs`, uma lista de tarefas local): em Conectores, Adicionar, Local, "Preencher com o servidor de demonstração".
 
 Depois:
 

@@ -3,7 +3,7 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import type { Parser } from '../src/core/engines/cli'
 import { claudeArgs, claudeParser } from '../src/core/engines/claude'
-import { codexArgs, codexParser } from '../src/core/engines/codex'
+import { CODEX_DISABLED_FEATURES, codexArgs, codexEnv, codexParser } from '../src/core/engines/codex'
 import type { EngineEvent } from '../src/core/engines/types'
 
 // Fixtures are real CLI output (Claude Code 2.1.286, Codex 0.153.4), trimmed of local paths.
@@ -100,6 +100,19 @@ describe('Codex exec stream', () => {
     expect(args[args.indexOf('-C') + 1]).toBe('/tmp/x')
     expect(args).toContain('developer_instructions="Você é \\"Theo\\"."')
     expect(args.at(-1)).toBe('-')
+  })
+
+  it('turns off skills, web search, project docs and every built-in tool', () => {
+    const args = codexArgs({ model: 'gpt-5.6-luna', effort: 'low', system: 'x', cwd: '/tmp/x' })
+    expect(args).toEqual(expect.arrayContaining(['skills.include_instructions=false', 'skills.bundled.enabled=false', 'web_search="disabled"', 'project_doc_max_bytes=0']))
+    for (const f of ['shell_tool', 'unified_exec', 'plugins', 'computer_use', 'multi_agent']) {
+      expect(CODEX_DISABLED_FEATURES).toContain(f)
+      expect(args[args.indexOf(f) - 1]).toBe('--disable')
+    }
+  })
+
+  it('runs in the app\'s own home, so the user\'s AGENTS.md, skills and memories never load', () => {
+    expect(codexEnv('/data/codex-home')).toMatchObject({ HOME: '/data/codex-home', CODEX_HOME: '/data/codex-home/.codex' })
   })
 
   it('gets the gateway as its only MCP server, with approval delegated to the gateway', () => {

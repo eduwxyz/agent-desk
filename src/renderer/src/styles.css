@@ -1546,3 +1546,12 @@ h3 {
 .retry {
   margin-top: 6px;
 }
+
+.connector__actions {
+  margin: 4px 0 12px;
+  gap: 8px;
+}
+.tools__new {
+  margin-left: 6px;
+  font-family: var(--font);
+}

@@ -2,7 +2,7 @@
 // live here so the window never waits on agent work. The renderer talks to it
 // over a MessagePort handed out by the main process.
 import { execFile } from 'node:child_process'
-import { mkdirSync } from 'node:fs'
+import { existsSync, mkdirSync } from 'node:fs'
 import { userInfo } from 'node:os'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
@@ -15,7 +15,9 @@ import { codexEngine } from './engines/codex'
 import { adoptLoginShellPath, detectEngines } from './engines/detect'
 import { fakeEngine } from './engines/fake'
 import type { Engine } from './engines/types'
+import { ConnectorManager } from './connectors'
 import { Gateway } from './gateway'
+import { mainCipher, plainCipher, Secrets } from './secrets'
 import { Runner } from './runs'
 import { seed } from './seed'
 
@@ -24,6 +26,8 @@ const fake = process.env['AGENT_DESK_FAKE_ENGINES'] === '1'
 mkdirSync(dataDir, { recursive: true })
 
 const db = new Db(join(dataDir, 'agent-desk.db'))
+const codexHome = join(dataDir, 'codex-home')
+mkdirSync(join(codexHome, '.codex'), { recursive: true })
 if (db.isEmpty()) seed(db)
 const interrupted = db.interruptStaleRuns()
 if (interrupted) console.log(`[core] ${interrupted} run(s) marked as interrupted`)
@@ -34,6 +38,7 @@ const DEFAULTS: Omit<Settings, 'engines'> = {
   context: '',
   routerModel: 'haiku',
   defaultLimit: 2_000_000,
+  approvalTtlHours: 24,
   theme: 'system'
 }
 
@@ -42,7 +47,7 @@ let engines: Record<EngineId, EngineStatus> = { claude: unknownEngine, codex: un
 
 const fakeStatus = (v: string): EngineStatus => ({ installed: true, loggedIn: true, path: 'fake', version: v, account: 'Motor de teste' })
 async function detect(): Promise<void> {
-  engines = fake ? { claude: fakeStatus('0.0.0'), codex: fakeStatus('0.0.0') } : await detectEngines()
+  engines = fake ? { claude: fakeStatus('0.0.0'), codex: fakeStatus('0.0.0') } : await detectEngines(codexHome)
   emit({ type: 'settings', settings: settings() })
 }
 const gateway = new Gateway()
@@ -52,7 +57,7 @@ const settings = (): Settings => ({ ...db.getSettings(DEFAULTS), engines })
 
 const engineImpls: Record<EngineId, Engine> = fake
   ? { claude: fakeEngine('claude'), codex: fakeEngine('codex') }
-  : { claude: claudeEngine(() => engines.claude.path), codex: codexEngine(() => engines.codex.path) }
+  : { claude: claudeEngine(() => engines.claude.path), codex: codexEngine(() => engines.codex.path, codexHome) }
 
 // ---------- ports ----------
 
@@ -62,21 +67,57 @@ function emit(event: CoreEvent): void {
   for (const p of ports) p.postMessage(wire)
 }
 
+// Asks the main process to do what only it can: open the browser, show a notification.
+const toMain = (msg: { type: 'open'; url: string } | { type: 'notify'; title: string; body: string }): void => process.parentPort.postMessage(msg)
+
+const secrets = new Secrets(db, fake ? plainCipher : mainCipher(process.parentPort))
+const connectors = new ConnectorManager({
+  db,
+  secrets,
+  emit,
+  openUrl: (url) => toMain({ type: 'open', url }),
+  oauthCallbackUrl: () => gateway.url('/oauth/callback')
+})
+gateway.route('/oauth/callback', async (url) => {
+  const code = url.searchParams.get('code')
+  const state = url.searchParams.get('state') ?? ''
+  if (!code) return `Autorização não concluída: ${url.searchParams.get('error_description') ?? url.searchParams.get('error') ?? 'sem código'}.`
+  return (await connectors.finishOAuth(state, code)) ? 'Conector autorizado. Pode fechar esta aba e voltar pro agent-desk.' : 'Esse pedido de autorização expirou. Tente de novo pelo app.'
+})
+
 const runner = new Runner({
   db,
   engines: engineImpls,
   settings: () => ready.then(settings),
   emit,
   workDir: join(dataDir, 'agents'),
-  gateway
+  gateway,
+  connectors,
+  notify: (title, body) => toMain({ type: 'notify', title, body })
+})
+
+void ready.then(async () => {
+  connectors.connectAll()
+  await runner.expireApprovals()
+  setInterval(() => void runner.expireApprovals(), 60_000).unref()
 })
 
 function emitConversations(ids?: string[]): void {
   for (const c of db.conversations()) if (!ids || ids.includes(c.id)) emit({ type: 'conversation', conversation: c })
 }
 
+const demoPath = join(process.cwd(), 'scripts', 'demo-mcp-server.mjs')
+
 const api: Api = {
-  snapshot: () => ({ settings: settings(), agents: db.agents(), conversations: db.conversations(), messages: db.messages() }),
+  snapshot: () => ({
+    settings: settings(),
+    agents: db.agents(),
+    conversations: db.conversations(),
+    messages: db.messages(),
+    connectors: connectors.list(),
+    approvals: db.approvals(),
+    demoServer: existsSync(demoPath) ? { command: 'node', args: [demoPath] } : undefined
+  }),
 
   sendMessage: ({ conversationId, text }) => {
     void runner.send(conversationId, text)
@@ -115,13 +156,26 @@ const api: Api = {
     emit({ type: 'settings', settings: settings() })
   },
 
+  // Validation errors come back to the form; connecting continues in the background.
+  addConnector: ({ input }) => connectors.add(input),
+
+  removeConnector: ({ id }) => void connectors.remove(id),
+  reconnectConnector: ({ id }) => void connectors.connect(id),
+  authorizeConnector: ({ id }) => void connectors.authorize(id),
+  updateTool: ({ connectorId, name, patch }) => connectors.updateTool(connectorId, name, patch),
+  decideApproval: ({ id, decision, reason }) => void runner.decide(id, decision, reason?.trim() || undefined),
+
   refreshEngines: () => {
     void detect()
   },
 
   // Login always happens in the CLI's own flow; the app never sees credentials.
+  // Codex logs into the app's own home (see codexEnv), separate from the user's.
   loginEngine: ({ engine }) => {
-    const cmd = engines[engine].path ? `${engines[engine].path!} ${ENGINES[engine].login.split(' ').slice(1).join(' ')}` : ENGINES[engine].login
+    const bin = engines[engine].path ?? ENGINES[engine].cli
+    const sub = ENGINES[engine].login.split(' ').slice(1).join(' ')
+    const q = (s: string): string => `'${s.replace(/'/g, `'\\''`)}'`
+    const cmd = engine === 'codex' ? `HOME=${q(codexHome)} CODEX_HOME=${q(join(codexHome, '.codex'))} ${q(bin)} ${sub}` : `${q(bin)} ${sub}`
     execFile('osascript', ['-e', 'tell application "Terminal" to activate', '-e', `tell application "Terminal" to do script ${JSON.stringify(cmd)}`])
   }
 }
@@ -130,12 +184,15 @@ function handle(port: MessagePortMain, req: Request): void {
   const reply = (r: Omit<Extract<Wire, { id: number }>, 'id'>): void => port.postMessage({ id: req.id, ...r } satisfies Wire)
   const fn = api[req.method as Method] as ((p: unknown) => unknown) | undefined
   if (!fn) return reply({ error: `unknown method ${req.method}` })
-  try {
-    reply({ result: fn(req.params) })
-  } catch (e) {
-    console.error(`[core] ${req.method}`, e)
-    reply({ error: e instanceof Error ? e.message : String(e) })
-  }
+  Promise.resolve()
+    .then(() => fn(req.params))
+    .then(
+      (result) => reply({ result }),
+      (e: unknown) => {
+        console.error(`[core] ${req.method}`, e)
+        reply({ error: e instanceof Error ? e.message : String(e) })
+      }
+    )
 }
 
 process.parentPort.on('message', (e) => {

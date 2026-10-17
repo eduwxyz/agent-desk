@@ -7,13 +7,19 @@ import {
   openDm,
   refreshEngines,
   saveAgent,
-  setToolClass,
+  addConnector,
+  authorizeConnector,
+  reconnectConnector,
+  removeConnector,
+  updateTool,
   updateSettings,
   useStore,
   EFFORTS,
   ENGINES,
   type Agent,
   type AgentColor,
+  type Connector,
+  type ConnectorAuth,
   type EngineId,
   type GrantLevel,
   type ToolClass
@@ -180,6 +186,14 @@ export function AgentPage({ id }: { id?: string }): ReactNode {
           </Card>
 
           <Card title="Ferramentas e acesso" lead="Um nível por conector. O que fica de fora nem aparece pro modelo.">
+            {connectors.length === 0 && (
+              <p className="muted small">
+                Nenhum conector ainda.{' '}
+                <button className="link" onClick={() => navigate({ kind: 'connectors' })}>
+                  Adicionar em Conectores
+                </button>
+              </p>
+            )}
             <div className="grants">
               {connectors.map((c) => {
                 const level = draft.grants[c.id] ?? 'none'
@@ -392,7 +406,10 @@ function HistoryRow({ id }: { id: string }): ReactNode {
   return (
     <div className="table__row">
       {agent && <AgentAvatar agent={agent} size={22} />}
-      <span className="grow">{a.title}</span>
+      <span className="grow">
+        {a.tool.replace(/_/g, ' ')} <span className="muted">· {a.connectorName}</span>
+      </span>
+      {a.outcome && <span className="muted small">{a.outcome}</span>}
       <span className={`tag ${a.state === 'approved' ? 'tag--ok' : 'tag--danger'}`}>{a.state === 'approved' ? 'aprovado' : a.state === 'refused' ? 'recusado' : 'expirado'}</span>
       <span className="muted small">{a.decidedAt ? time(a.decidedAt) : ''}</span>
     </div>
@@ -492,25 +509,54 @@ function ReceiptRow({ id }: { id: string }): ReactNode {
 
 const CLASS_LABEL: Record<ToolClass, string> = { read: 'leitura', write: 'escrita', sensitive: 'sensível' }
 
+const STATUS: Record<Connector['status'], { label: string; tone: string }> = {
+  connected: { label: 'conectado', tone: 'tag--ok' },
+  connecting: { label: 'conectando…', tone: '' },
+  needs_auth: { label: 'precisa autorizar', tone: 'tag--warn' },
+  error: { label: 'com problema', tone: 'tag--danger' },
+  disconnected: { label: 'desconectado', tone: 'tag--warn' }
+}
+
+const address = (c: Connector): string => (c.kind === 'remote' ? (c.url ?? '') : [c.command, ...(c.args ?? [])].join(' '))
+
 export function ConnectorsPage(): ReactNode {
   const connectors = useStore((s) => s.connectors)
   const agents = useStore((s) => s.agents)
-  const [openId, setOpenId] = useState<string | null>(connectors[0]?.id ?? null)
+  const [openId, setOpenId] = useState<string | null>(null)
+  const [adding, setAdding] = useState(false)
 
   return (
     <Page
       title="Conectores"
-      subtitle="Servidores MCP conectados uma vez. Depois você escolhe o que cada agente pode usar."
+      subtitle="Servidores MCP conectados uma vez, pelo app. Os agentes nunca falam com eles direto: cada chamada passa pelas permissões e aprovações."
       actions={
-        <button className="btn btn--primary">
-          <Icon name="plus" size={14} /> Adicionar conector
-        </button>
+        !adding && (
+          <button className="btn btn--primary" onClick={() => setAdding(true)}>
+            <Icon name="plus" size={14} /> Adicionar conector
+          </button>
+        )
       }
     >
+      {adding && (
+        <AddConnector
+          onDone={(id) => {
+            setAdding(false)
+            if (id) setOpenId(id)
+          }}
+        />
+      )}
+      {connectors.length === 0 && !adding && (
+        <div className="empty empty--card">
+          <Icon name="plug" size={22} />
+          <p>Nenhum conector ainda.</p>
+          <p className="muted">Adicione um servidor MCP remoto (GitHub, Linear, Sentry…) ou um local, que roda como processo no seu computador.</p>
+        </div>
+      )}
       <div className="stack-list">
         {connectors.map((c) => {
           const users = agents.filter((a) => (a.grants[c.id] ?? 'none') !== 'none')
           const open = openId === c.id
+          const fresh = c.tools.filter((t) => t.isNew).length
           return (
             <div key={c.id} className={`card connector ${open ? 'is-open' : ''}`}>
               <button className="connector__head" onClick={() => setOpenId(open ? null : c.id)}>
@@ -519,11 +565,10 @@ export function ConnectorsPage(): ReactNode {
                 </span>
                 <span className="grow">
                   <strong>{c.name}</strong>
-                  <span className="muted small mono truncate">{c.address}</span>
+                  <span className="muted small mono truncate">{address(c)}</span>
                 </span>
-                <span className={`tag ${c.status === 'connected' ? 'tag--ok' : 'tag--warn'}`}>
-                  {c.status === 'connected' ? 'conectado' : 'precisa reconectar'}
-                </span>
+                {fresh > 0 && <span className="tag tag--warn">{fresh} nova{fresh === 1 ? '' : 's'}</span>}
+                <span className={`tag ${STATUS[c.status].tone}`}>{STATUS[c.status].label}</span>
                 <span className="stack">
                   {users.map((a) => (
                     <span key={a.id} className="stack__item">
@@ -542,16 +587,43 @@ export function ConnectorsPage(): ReactNode {
                       <Icon name="terminal" size={14} /> Conector local: roda um processo no seu computador com o seu usuário.
                     </p>
                   )}
-                  <div className="tools__head small muted">
-                    <span>Ferramenta</span>
-                    <span>Classe</span>
-                    <span>Alto risco</span>
-                    <span>Ligada</span>
+                  {c.error && <p className="note note--error">{c.error}</p>}
+                  <div className="row connector__actions">
+                    {c.status === 'needs_auth' && (
+                      <button className="btn btn--primary btn--sm" onClick={() => authorizeConnector(c.id)}>
+                        Autorizar no navegador
+                      </button>
+                    )}
+                    {c.status !== 'connecting' && (
+                      <button className="btn btn--sm" onClick={() => reconnectConnector(c.id)}>
+                        {c.status === 'connected' ? 'Atualizar ferramentas' : 'Conectar de novo'}
+                      </button>
+                    )}
+                    <span className="grow" />
+                    <button
+                      className="btn btn--ghost btn--sm"
+                      onClick={() => {
+                        if (confirm(`Remover ${c.name}? Os agentes perdem acesso às ferramentas dele.`)) removeConnector(c.id)
+                      }}
+                    >
+                      Remover
+                    </button>
                   </div>
+                  {c.tools.length > 0 && (
+                    <div className="tools__head small muted">
+                      <span>Ferramenta</span>
+                      <span>Classe</span>
+                      <span>Alto risco</span>
+                      <span>Ligada</span>
+                    </div>
+                  )}
                   {c.tools.map((t) => (
-                    <div key={t.name} className={`tools__row ${t.enabled ? '' : 'is-off'}`}>
-                      <code>{t.name}</code>
-                      <select value={t.cls} onChange={(e) => setToolClass(c.id, t.name, { cls: e.target.value as ToolClass })}>
+                    <div key={t.name} className={`tools__row ${t.enabled ? '' : 'is-off'}`} title={t.description}>
+                      <code>
+                        {t.name}
+                        {t.isNew && <span className="tag tag--warn tools__new">nova</span>}
+                      </code>
+                      <select value={t.cls} onChange={(e) => updateTool(c.id, t.name, { cls: e.target.value as ToolClass })}>
                         {(Object.keys(CLASS_LABEL) as ToolClass[]).map((k) => (
                           <option key={k} value={k}>
                             {CLASS_LABEL[k]}
@@ -561,13 +633,13 @@ export function ConnectorsPage(): ReactNode {
                       <input
                         type="checkbox"
                         disabled={t.cls !== 'sensitive'}
-                        checked={!!t.highRisk && t.cls === 'sensitive'}
-                        onChange={(e) => setToolClass(c.id, t.name, { highRisk: e.target.checked })}
+                        checked={t.highRisk && t.cls === 'sensitive'}
+                        onChange={(e) => updateTool(c.id, t.name, { highRisk: e.target.checked })}
                       />
-                      <Toggle on={t.enabled} onChange={(v) => setToolClass(c.id, t.name, { enabled: v })} />
+                      <Toggle on={t.enabled} onChange={(v) => updateTool(c.id, t.name, { enabled: v })} />
                     </div>
                   ))}
-                  <p className="hint">Ferramentas novas que o servidor publicar depois entram desligadas até você revisar.</p>
+                  <p className="hint">Ferramentas novas que o servidor publicar depois entram desligadas até você revisar. Sensíveis sempre pedem aprovação.</p>
                 </div>
               )}
             </div>
@@ -575,6 +647,119 @@ export function ConnectorsPage(): ReactNode {
         })}
       </div>
     </Page>
+  )
+}
+
+// "a b 'c d'" -> ["a", "b", "c d"]
+const splitArgs = (line: string): string[] => [...line.matchAll(/"([^"]*)"|'([^']*)'|(\S+)/g)].map((m) => m[1] ?? m[2] ?? m[3]!)
+
+function AddConnector({ onDone }: { onDone: (id?: string) => void }): ReactNode {
+  const demo = useStore((s) => s.demoServer)
+  const [kind, setKind] = useState<'remote' | 'stdio'>('remote')
+  const [name, setName] = useState('')
+  const [url, setUrl] = useState('')
+  const [auth, setAuth] = useState<ConnectorAuth>('oauth')
+  const [token, setToken] = useState('')
+  const [command, setCommand] = useState('')
+  const [args, setArgs] = useState('')
+  const [env, setEnv] = useState('')
+  const [error, setError] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+
+  const submit = async (): Promise<void> => {
+    setBusy(true)
+    setError(null)
+    try {
+      const envMap = Object.fromEntries(
+        env
+          .split('\n')
+          .map((l) => l.trim())
+          .filter((l) => l.includes('='))
+          .map((l) => [l.slice(0, l.indexOf('=')).trim(), l.slice(l.indexOf('=') + 1).trim()])
+      )
+      const id = await addConnector(
+        kind === 'remote' ? { kind, name, url, auth, token: auth === 'token' ? token : undefined } : { kind, name, command, args: splitArgs(args), env: envMap }
+      )
+      onDone(id)
+    } catch (e) {
+      setError(e instanceof Error ? e.message.replace(/^Error: /, '') : String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Card title="Novo conector" lead="Credenciais ficam cifradas no cofre do sistema e nunca aparecem de novo.">
+      <div className="segmented segmented--wide" role="radiogroup" aria-label="Tipo">
+        <button role="radio" aria-checked={kind === 'remote'} className={kind === 'remote' ? 'is-active' : ''} onClick={() => setKind('remote')}>
+          Remoto (URL)
+        </button>
+        <button role="radio" aria-checked={kind === 'stdio'} className={kind === 'stdio' ? 'is-active' : ''} onClick={() => setKind('stdio')}>
+          Local (comando)
+        </button>
+      </div>
+      <Field label="Nome">
+        <input value={name} placeholder={kind === 'remote' ? 'Ex.: Linear' : 'Ex.: Postgres'} onChange={(e) => setName(e.target.value)} />
+      </Field>
+      {kind === 'remote' ? (
+        <>
+          <Field label="URL do servidor MCP">
+            <input value={url} placeholder="https://mcp.linear.app/mcp" onChange={(e) => setUrl(e.target.value)} />
+          </Field>
+          <Field label="Autenticação">
+            <select value={auth} onChange={(e) => setAuth(e.target.value as ConnectorAuth)}>
+              <option value="oauth">OAuth (abre o navegador pra autorizar)</option>
+              <option value="token">Token (cabeçalho Authorization: Bearer)</option>
+              <option value="none">Nenhuma</option>
+            </select>
+          </Field>
+          {auth === 'token' && (
+            <Field label="Token">
+              <input type="password" value={token} onChange={(e) => setToken(e.target.value)} />
+            </Field>
+          )}
+        </>
+      ) : (
+        <>
+          <p className="warn-box">
+            <Icon name="terminal" size={14} /> Vai rodar um processo no seu computador, com o seu usuário. Só adicione comandos em que você confia.
+          </p>
+          <div className="grid2">
+            <Field label="Comando">
+              <input value={command} placeholder="npx" onChange={(e) => setCommand(e.target.value)} />
+            </Field>
+            <Field label="Argumentos">
+              <input value={args} placeholder="-y @modelcontextprotocol/server-postgres postgres://…" onChange={(e) => setArgs(e.target.value)} />
+            </Field>
+          </div>
+          <Field label="Variáveis de ambiente" hint="Uma por linha, NOME=valor. Os valores ficam cifrados.">
+            <textarea rows={2} value={env} onChange={(e) => setEnv(e.target.value)} />
+          </Field>
+          {demo && (
+            <button
+              className="link small"
+              onClick={() => {
+                setName('Tarefas (demo)')
+                setCommand(demo.command)
+                setArgs(demo.args.map((a) => (a.includes(' ') ? `"${a}"` : a)).join(' '))
+              }}
+            >
+              Preencher com o servidor de demonstração (lista de tarefas local)
+            </button>
+          )}
+        </>
+      )}
+      {error && <p className="note note--error">{error}</p>}
+      <div className="row connector__actions">
+        <span className="grow" />
+        <button className="btn btn--ghost" onClick={() => onDone()}>
+          Cancelar
+        </button>
+        <button className="btn btn--primary" disabled={busy || !name.trim()} onClick={() => void submit()}>
+          {busy ? 'Conectando…' : 'Conectar'}
+        </button>
+      </div>
+    </Card>
   )
 }
 
@@ -624,7 +809,7 @@ export function SettingsPage(): ReactNode {
                     {st.installed ? (
                       <>
                         <span className="mono">{st.path}</span> · v{st.version}
-                        {st.loggedIn && st.account ? ` · ${st.account}` : ''}
+                        {st.account ? ` · ${st.account}` : ''}
                       </>
                     ) : (
                       `Instale a CLI ${ENGINES[e].cli} e volte aqui.`
@@ -666,7 +851,7 @@ export function SettingsPage(): ReactNode {
               />
             </Field>
             <Field label="Expiração de aprovações">
-              <select defaultValue="24">
+              <select value={settings.approvalTtlHours} onChange={(e) => updateSettings({ approvalTtlHours: Number(e.target.value) })}>
                 <option value="1">1 hora</option>
                 <option value="24">24 horas</option>
                 <option value="168">7 dias</option>

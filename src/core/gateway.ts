@@ -26,6 +26,7 @@ export class Gateway {
   private http: HttpServer | null = null
   private port = 0
   private sessions = new Map<string, Session>()
+  private routes = new Map<string, (url: URL) => Promise<string>>()
 
   async start(): Promise<void> {
     this.http = createServer((req, res) => {
@@ -39,8 +40,18 @@ export class Gateway {
   }
 
   async stop(): Promise<void> {
+    this.http?.closeAllConnections() // don't wait for idle keep-alive sockets
     await new Promise<void>((resolve) => (this.http ? this.http.close(() => resolve()) : resolve()))
     this.http = null
+  }
+
+  // Plain GET pages on the same local server (the OAuth callback); the handler returns the page text.
+  route(path: string, handler: (url: URL) => Promise<string>): void {
+    this.routes.set(path, handler)
+  }
+
+  url(path: string): string {
+    return `http://127.0.0.1:${this.port}${path}`
   }
 
   // Returns the URL to hand to the CLI, and a function that revokes it.
@@ -51,6 +62,15 @@ export class Gateway {
   }
 
   private async handle(req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse): Promise<void> {
+    const url = new URL(req.url ?? '/', 'http://127.0.0.1')
+    const route = req.method === 'GET' ? this.routes.get(url.pathname) : undefined
+    if (route) {
+      const text = await route(url).catch((e: unknown) => `Erro: ${e instanceof Error ? e.message : String(e)}`)
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
+      res.end(`<!doctype html><meta charset="utf-8"><title>agent-desk</title><body style="font:16px system-ui;padding:48px;color:#222">${text.replace(/</g, '&lt;')}</body>`)
+      return
+    }
+
     const token = /^\/mcp\/([a-f0-9]{48})$/.exec(req.url ?? '')?.[1]
     const session = token ? this.sessions.get(token) : undefined
     if (!session) {

@@ -1,10 +1,38 @@
+import { join } from 'node:path'
 import { GATEWAY_NAME } from './claude'
 import { lastLines, num, parseJson, runCli, type Parser } from './cli'
 import type { Engine, EngineEvent, Turn } from './types'
 
-// Flags that keep the CLI isolated: ignore the user's config, rules, MCP
-// servers and plugins; no saved session; the shell is sandboxed read-only in
-// an empty directory. The prompt comes from stdin ("-"). The app's gateway,
+// Codex reads AGENTS.md, skills, plugins and memories from the user's home no
+// matter which flags are passed, so agent-desk runs it with a home of its
+// own. The user logs into Codex once more, for the app, through Codex itself.
+export function codexEnv(home: string): NodeJS.ProcessEnv {
+  return { ...process.env, HOME: home, CODEX_HOME: join(home, '.codex') }
+}
+
+// Built-in capabilities agents must not have: their tools come only from the gateway.
+export const CODEX_DISABLED_FEATURES = [
+  'shell_tool',
+  'unified_exec',
+  'code_mode_host',
+  'apps',
+  'plugins',
+  'browser_use',
+  'computer_use',
+  'in_app_browser',
+  'image_generation',
+  'multi_agent',
+  'goals',
+  'view_image',
+  'tool_suggest',
+  'skill_search',
+  'hooks',
+  'memories'
+]
+
+// Flags that keep the CLI isolated: ignore config and rules, no skills, no web
+// search, no project docs, built-in tools off, no saved session, and a
+// read-only sandbox in an empty directory as a last line of defense. The prompt comes from stdin ("-"). The app's gateway,
 // when given, is the only MCP server, with its tools approved up front: the
 // gateway decides what runs.
 export function codexArgs(turn: Pick<Turn, 'model' | 'effort' | 'system' | 'cwd' | 'mcpUrl'>): string[] {
@@ -26,6 +54,11 @@ export function codexArgs(turn: Pick<Turn, 'model' | 'effort' | 'system' | 'cwd'
     '-m', turn.model,
     '-c', `model_reasoning_effort=${JSON.stringify(turn.effort)}`,
     '-c', `developer_instructions=${JSON.stringify(turn.system)}`,
+    '-c', 'skills.include_instructions=false',
+    '-c', 'skills.bundled.enabled=false',
+    '-c', 'web_search="disabled"',
+    '-c', 'project_doc_max_bytes=0',
+    ...CODEX_DISABLED_FEATURES.flatMap((f) => ['--disable', f]),
     ...gateway,
     '-'
   ]
@@ -75,7 +108,7 @@ export function codexParser(): Parser {
   }
 }
 
-export function codexEngine(bin: () => string | undefined): Engine {
+export function codexEngine(bin: () => string | undefined, home: string): Engine {
   return {
     id: 'codex',
     async *run(turn) {
@@ -84,7 +117,7 @@ export function codexEngine(bin: () => string | undefined): Engine {
         yield { type: 'error', message: 'O Codex não está instalado. Veja em Configurações.' }
         return
       }
-      yield* runCli({ bin: path, args: codexArgs(turn), stdin: turn.prompt, cwd: turn.cwd, signal: turn.signal, parser: codexParser() })
+      yield* runCli({ bin: path, args: codexArgs(turn), stdin: turn.prompt, cwd: turn.cwd, signal: turn.signal, parser: codexParser(), env: codexEnv(home) })
     }
   }
 }

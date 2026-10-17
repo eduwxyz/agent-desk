@@ -93,6 +93,7 @@ export interface Settings {
   engines: Record<EngineId, EngineStatus>
   routerModel: string
   defaultLimit: number
+  approvalTtlHours: number
   theme: 'system' | 'light' | 'dark'
 }
 
@@ -118,3 +119,62 @@ export const EFFORTS: { id: Effort; label: string }[] = [
 ]
 
 export const modelInfo = (id: string): Model | undefined => MODELS.find((m) => m.id === id)
+
+export interface ConnectorTool {
+  name: string
+  description: string
+  cls: ToolClass
+  enabled: boolean
+  highRisk: boolean
+  isNew: boolean // appeared after the first sync; starts disabled until reviewed
+}
+
+export type ConnectorAuth = 'none' | 'token' | 'oauth'
+export type ConnectorStatus = 'connected' | 'connecting' | 'needs_auth' | 'error' | 'disconnected'
+
+export interface Connector {
+  id: string
+  name: string
+  kind: 'remote' | 'stdio'
+  url?: string // remote
+  command?: string // stdio
+  args?: string[]
+  envKeys?: string[] // names only; values are secrets
+  auth: ConnectorAuth
+  status: ConnectorStatus
+  error?: string
+  tools: ConnectorTool[]
+}
+
+export interface ConnectorInput {
+  name: string
+  kind: 'remote' | 'stdio'
+  url?: string
+  auth?: ConnectorAuth
+  token?: string
+  command?: string
+  args?: string[]
+  env?: Record<string, string>
+}
+
+export type ApprovalState = 'pending' | 'approved' | 'refused' | 'expired'
+
+export interface Approval {
+  id: string
+  hash: string // sha256 of connector, tool and canonical arguments
+  agentId: string
+  conversationId: string
+  messageId: string
+  connectorId: string
+  connectorName: string
+  tool: string
+  args: Record<string, unknown>
+  why: string
+  highRisk: boolean
+  state: ApprovalState
+  reason?: string
+  outcome?: string // short summary of what happened when it ran
+  createdAt: number
+  expiresAt: number
+  decidedAt?: number
+}

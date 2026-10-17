@@ -320,22 +320,26 @@ export function ApprovalCard({ approval, compact }: { approval: Approval; compac
         {approval.highRisk && <span className="tag tag--danger">alto risco</span>}
       </div>
       <div className="approval__title">
-        {agent?.name} quer: {approval.title}
+        {agent?.name ?? 'Agente'} quer usar <strong>{approval.tool.replace(/_/g, ' ')}</strong> no {approval.connectorName}
       </div>
-      <p className="approval__why">{approval.why}</p>
+      {approval.why && <p className="approval__why">{approval.why}</p>}
       <div className="approval__call">
         <code>
-          {approval.connector}.{approval.tool}
+          {approval.connectorName} · {approval.tool}
         </code>
         <pre>{JSON.stringify(approval.args, null, 2)}</pre>
       </div>
-      <p className="approval__bound">A aprovação cobre só esta chamada, com estes valores. Se mudar qualquer coisa, o agente pede de novo.</p>
+      <p className="approval__bound">
+        A aprovação cobre só esta chamada, com estes valores. Se mudar qualquer coisa, o agente pede de novo.
+        {!decided && ` Expira ${time(approval.expiresAt)}.`}
+      </p>
 
       {decided ? (
         <div className="approval__decided">
-          {approval.state === 'approved' ? 'Aprovado' : 'Recusado'} por {me.name}
+          {approval.state === 'expired' ? 'Expirou sem decisão' : `${approval.state === 'approved' ? 'Aprovado' : 'Recusado'} por ${me.name}`}
           {approval.decidedAt ? ` · ${time(approval.decidedAt)}` : ''}
           {approval.reason ? ` · “${approval.reason}”` : ''}
+          {approval.outcome ? ` · ${approval.outcome}` : ''}
         </div>
       ) : refusing ? (
         <form

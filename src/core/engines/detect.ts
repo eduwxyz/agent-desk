@@ -2,10 +2,11 @@ import { execFile } from 'node:child_process'
 import { access, constants } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { EngineId, EngineStatus } from '../../shared/types'
+import { codexEnv } from './codex'
 
-function run(bin: string, args: string[], timeout = 15_000): Promise<{ code: number; stdout: string; stderr: string }> {
+function run(bin: string, args: string[], timeout = 15_000, env: NodeJS.ProcessEnv = process.env): Promise<{ code: number; stdout: string; stderr: string }> {
   return new Promise((resolve) => {
-    execFile(bin, args, { timeout, env: process.env }, (err, stdout, stderr) => {
+    execFile(bin, args, { timeout, env }, (err, stdout, stderr) => {
       const code = err ? (typeof err.code === 'number' ? err.code : 1) : 0
       resolve({ code, stdout: String(stdout), stderr: String(stderr) })
     })
@@ -60,24 +61,25 @@ export async function detectClaude(): Promise<EngineStatus> {
   }
 }
 
-export async function detectCodex(): Promise<EngineStatus> {
+// Checks the app's own Codex login (see codexEnv), not the user's.
+export async function detectCodex(home: string): Promise<EngineStatus> {
   const path = await which('codex')
   if (!path) return { installed: false, loggedIn: false }
-  const [v, auth] = await Promise.all([run(path, ['--version']), run(path, ['login', 'status'])])
+  const [v, auth] = await Promise.all([run(path, ['--version']), run(path, ['login', 'status'], 15_000, codexEnv(home))])
   const text = `${auth.stdout}\n${auth.stderr}`
-  const loggedIn = auth.code === 0 && /logged in/i.test(text)
+  const loggedIn = auth.code === 0 && /logged in/i.test(text) && !/not logged in/i.test(text)
   const viaChatGpt = /chatgpt/i.test(text)
   return {
     installed: true,
     path,
     version: version(v.stdout),
     loggedIn,
-    account: loggedIn ? (viaChatGpt ? 'Assinatura ChatGPT' : 'Chave de API') : undefined,
+    account: loggedIn ? (viaChatGpt ? 'Assinatura ChatGPT · login próprio do agent-desk' : 'Chave de API') : 'Precisa de um login próprio do agent-desk',
     warning: loggedIn && !viaChatGpt ? 'Logado com chave de API: o uso será cobrado por token.' : undefined
   }
 }
 
-export async function detectEngines(): Promise<Record<EngineId, EngineStatus>> {
-  const [claude, codex] = await Promise.all([detectClaude(), detectCodex()])
+export async function detectEngines(codexHome: string): Promise<Record<EngineId, EngineStatus>> {
+  const [claude, codex] = await Promise.all([detectClaude(), detectCodex(codexHome)])
   return { claude, codex }
 }

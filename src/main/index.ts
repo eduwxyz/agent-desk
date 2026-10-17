@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, MessageChannelMain, shell, utilityProcess, type UtilityProcess } from 'electron'
+import { app, BrowserWindow, ipcMain, MessageChannelMain, Notification, safeStorage, shell, utilityProcess, type UtilityProcess } from 'electron'
 import { join } from 'node:path'
 
 let core: UtilityProcess | null = null
@@ -10,11 +10,35 @@ function startCore(): UtilityProcess {
     serviceName: 'agent-desk-core',
     env: { ...process.env, AGENT_DESK_DATA: process.env['AGENT_DESK_DATA'] ?? app.getPath('userData') }
   })
+  child.on('message', (msg: CoreRequest) => handleCore(child, msg))
   child.on('exit', (code) => {
     console.error(`[main] core exited with code ${code}`)
     if (core === child) core = null
   })
   return child
+}
+
+type CoreRequest =
+  | { type: 'secret'; id: string; op: 'encrypt' | 'decrypt'; data: string }
+  | { type: 'open'; url: string }
+  | { type: 'notify'; title: string; body: string }
+
+// Things the core can't do itself: the OS keychain, the browser, notifications.
+function handleCore(child: UtilityProcess, msg: CoreRequest): void {
+  if (msg.type === 'secret') {
+    try {
+      if (!safeStorage.isEncryptionAvailable()) throw new Error('O cofre do sistema não está disponível.')
+      const data =
+        msg.op === 'encrypt' ? safeStorage.encryptString(msg.data).toString('base64') : safeStorage.decryptString(Buffer.from(msg.data, 'base64'))
+      child.postMessage({ type: 'secret-result', id: msg.id, data })
+    } catch (e) {
+      child.postMessage({ type: 'secret-result', id: msg.id, error: e instanceof Error ? e.message : String(e) })
+    }
+  } else if (msg.type === 'open') {
+    if (/^https?:\/\//.test(msg.url)) void shell.openExternal(msg.url)
+  } else if (msg.type === 'notify') {
+    if (Notification.isSupported()) new Notification({ title: msg.title, body: msg.body }).show()
+  }
 }
 
 // Each page load asks for a port; one end goes to the core, the other to the page.

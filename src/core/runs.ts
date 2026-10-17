@@ -2,18 +2,22 @@ import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import type { CoreEvent } from '../shared/rpc'
-import { ENGINES, modelInfo, type Agent, type Conversation, type EngineId, type Message, type Receipt, type Run, type RunStatus, type Settings, type Step } from '../shared/types'
+import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
+import { ENGINES, modelInfo, type Agent, type Approval, type Connector, type ConnectorTool, type Conversation, type EngineId, type Message, type Receipt, type Run, type RunStatus, type Settings, type Step } from '../shared/types'
 import { HISTORY_LIMIT, mentioned, systemPrompt, transcript } from './context'
 import type { Db } from './db'
 import type { Engine } from './engines/types'
 import { textResult, type Gateway, type ToolDef } from './gateway'
 import { route } from './router'
+import { allowed, approvalHash, canonical } from './policy'
 
 const MAX_CONCURRENT = 4
 const MAX_MENTIONS = 3
 const MAX_DEPTH = 3 // agent replies chained from one human message
 const DELTA_FLUSH_MS = 40
 const RETRYABLE: RunStatus[] = ['failed', 'stopped', 'interrupted', 'limit_reached']
+const MAX_RESULT_CHARS = 60_000 // per tool result handed back to the model
+const REASON_PARAM = '_motivo'
 
 export const ASK_USER: ToolDef = {
   name: 'ask_user',
@@ -32,7 +36,35 @@ export interface RunnerDeps {
   emit: (e: CoreEvent) => void
   workDir: string // per-agent empty directories live here
   gateway?: Gateway // without it, agents get no tools at all
+  connectors?: Connectors
+  notify?: (title: string, body: string) => void
 }
+
+// What the runner needs from the connector manager.
+export interface Connectors {
+  list(): Connector[]
+  call(id: string, name: string, args: Record<string, unknown>): Promise<CallToolResult>
+}
+
+type Exposed = { connector: Connector; tool: ConnectorTool & { inputSchema: Record<string, unknown> } }
+
+// Tool names the CLI sees: "<connector>__<tool>", unique per turn.
+function exposedName(connector: Connector, tool: string, taken: Set<string>): string {
+  const slug = connector.name.toLowerCase().normalize('NFD').replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '').slice(0, 16) || 'conector'
+  let name = `${slug}__${tool}`.slice(0, 48)
+  for (let i = 2; taken.has(name); i++) name = `${slug}${i}__${tool}`.slice(0, 48)
+  taken.add(name)
+  return name
+}
+
+export function resultText(r: CallToolResult): string {
+  const text = r.content
+    .map((c) => (c.type === 'text' ? c.text : `[${c.type}]`))
+    .join('\n')
+  return text.length > MAX_RESULT_CHARS ? `${text.slice(0, MAX_RESULT_CHARS)}\n[… resultado cortado em ${MAX_RESULT_CHARS} caracteres]` : text
+}
+
+const clip = (r: CallToolResult): CallToolResult => ({ ...r, content: [{ type: 'text', text: resultText(r) }] })
 
 type Control = { ctl: AbortController; reason?: 'stopped' | 'limit' }
 
@@ -183,7 +215,7 @@ export class Runner {
     }
   }
 
-  private async execute(agent: Agent, conv: Conversation, opts: { depth: number; existing?: Message }): Promise<void> {
+  private async execute(agent: Agent, conv: Conversation, opts: { depth: number; existing?: Message; task?: string }): Promise<void> {
     const { db, emit, engines } = this.deps
     const settings = await this.deps.settings()
     agent = db.agent(agent.id) ?? agent // limits or instructions may have changed while queued
@@ -248,24 +280,106 @@ export class Runner {
       pending = ''
     }
 
-    // Tools for this turn, served by the gateway under a URL only this turn knows.
+    // Tools for this turn, served by the gateway under a URL only this turn knows:
+    // ask_user plus the connector tools this agent's grants allow.
     let question: string | undefined
-    const session = this.deps.gateway?.open({
-      tools: [ASK_USER],
-      call: async (name, args) => {
-        if (name !== ASK_USER.name) return textResult(`Ferramenta desconhecida: ${name}`, true)
-        const q = typeof args['question'] === 'string' ? args['question'].trim() : ''
-        if (!q) return textResult('Faltou a pergunta.', true)
-        if (question) return textResult('Você já fez uma pergunta nesta resposta. Encerre agora.', true)
-        question = q
-        flush() // keep streamed text and the full-message event in order
-        msg.run = {
-          ...msg.run!,
-          steps: [...closeThinking('done', 'Pensou'), { id: randomUUID(), label: 'Perguntou a você', detail: q, status: 'done' }, thinking()]
+    let approval: Approval | undefined
+    const exposed = new Map<string, Exposed>()
+    const taken = new Set<string>([ASK_USER.name])
+    for (const c of this.deps.connectors?.list() ?? []) {
+      if (c.status !== 'connected') continue
+      for (const t of db.tools(c.id)) if (allowed(t, agent.grants[c.id])) exposed.set(exposedName(c, t.name, taken), { connector: c, tool: t })
+    }
+    const toolDefs: ToolDef[] = [
+      ASK_USER,
+      ...[...exposed].map(([name, { connector, tool }]): ToolDef => {
+        const schema = tool.inputSchema as ToolDef['inputSchema']
+        if (tool.cls !== 'sensitive') return { name, description: `[${connector.name}] ${tool.description}`, inputSchema: schema }
+        return {
+          name,
+          description: `[${connector.name}] ${tool.description}\nAção sensível: não roda na hora. Vira um pedido de aprovação pra ${settings.workspaceName}, com exatamente estes argumentos.`,
+          inputSchema: {
+            ...schema,
+            type: 'object',
+            properties: { ...(schema.properties ?? {}), [REASON_PARAM]: { type: 'string', description: `Por que você quer fazer isso, em uma frase. Aparece pra ${settings.workspaceName} no pedido de aprovação.` } }
+          }
         }
-        stepStarted = Date.now()
+      })
+    ]
+
+    const addSteps = (...steps: Step[]): void => {
+      flush() // keep streamed text and the full-message event in order
+      msg.run = { ...msg.run!, steps: [...closeThinking('done', 'Pensou'), ...steps, thinking()] }
+      stepStarted = Date.now()
+      save()
+    }
+
+    const session = this.deps.gateway?.open({
+      tools: toolDefs,
+      call: async (name, args) => {
+        if (name === ASK_USER.name) {
+          const q = typeof args['question'] === 'string' ? args['question'].trim() : ''
+          if (!q) return textResult('Faltou a pergunta.', true)
+          if (question || approval) return textResult('Você já está esperando uma resposta nesta mensagem. Encerre agora.', true)
+          question = q
+          addSteps({ id: randomUUID(), label: 'Perguntou a você', detail: q, status: 'done' })
+          return textResult(`Pergunta enviada a ${settings.workspaceName}. Encerre sua resposta agora com no máximo uma frase, sem repetir a pergunta. A resposta chega na próxima mensagem.`)
+        }
+
+        const hit = exposed.get(name)
+        if (!hit) return textResult(`Ferramenta desconhecida: ${name}`, true)
+        // Defense in depth: grants or the tool may have changed since the turn started.
+        const current = db.tools(hit.connector.id).find((t) => t.name === hit.tool.name)
+        if (!current || !allowed(current, db.agent(agent.id)?.grants[hit.connector.id])) return textResult(`Ferramenta não permitida agora: ${name}`, true)
+        const detail = `${hit.connector.name} · ${current.name}`
+
+        if (current.cls === 'sensitive') {
+          if (question || approval) return textResult('Já existe um pedido esperando decisão nesta mensagem. Encerre agora.', true)
+          const { [REASON_PARAM]: why, ...callArgs } = args
+          approval = {
+            id: randomUUID(),
+            hash: approvalHash(hit.connector.id, current.name, callArgs),
+            agentId: agent.id,
+            conversationId: conv.id,
+            messageId: msg.id,
+            connectorId: hit.connector.id,
+            connectorName: hit.connector.name,
+            tool: current.name,
+            args: callArgs,
+            why: typeof why === 'string' ? why.trim() : '',
+            highRisk: current.highRisk,
+            state: 'pending',
+            createdAt: Date.now(),
+            expiresAt: Date.now() + settings.approvalTtlHours * 3_600_000
+          }
+          db.createApproval(approval)
+          emit({ type: 'approval', approval })
+          msg.run = { ...msg.run!, approvalId: approval.id }
+          addSteps({ id: randomUUID(), label: 'Pediu aprovação', detail, status: 'done' })
+          this.deps.notify?.(`${agent.name} pede aprovação`, `${detail}${approval.why ? `: ${approval.why}` : ''}`)
+          return textResult(
+            `Pedido de aprovação criado. A ação ainda NÃO foi executada. Encerre sua resposta agora dizendo em uma frase o que pediu. Quando ${settings.workspaceName} decidir, você recebe o resultado numa nova mensagem.`
+          )
+        }
+
+        const t0 = Date.now()
+        const step: Step = { id: randomUUID(), label: current.cls === 'read' ? 'Consultou' : 'Executou', detail, status: 'running' }
+        flush()
+        msg.run = { ...msg.run!, steps: [...closeThinking('done', 'Pensou'), step] }
         save()
-        return textResult(`Pergunta enviada a ${settings.workspaceName}. Encerre sua resposta agora com no máximo uma frase, sem repetir a pergunta. A resposta chega na próxima mensagem.`)
+        const finish = (status: 'done' | 'error'): void => {
+          msg.run = { ...msg.run!, steps: [...msg.run!.steps.map((s) => (s.id === step.id ? { ...s, status, ms: Date.now() - t0 } : s)), thinking()] }
+          stepStarted = Date.now()
+          save()
+        }
+        try {
+          const r = await this.deps.connectors!.call(hit.connector.id, current.name, args)
+          finish(r.isError ? 'error' : 'done')
+          return clip(r)
+        } catch (e) {
+          finish('error')
+          return textResult(`A ferramenta falhou: ${e instanceof Error ? e.message : String(e)}`, true)
+        }
       }
     })
 
@@ -278,7 +392,7 @@ export class Runner {
         model: agent.modelId,
         effort: agent.effort,
         system: systemPrompt({ agent, settings, conversation: conv, peers }),
-        prompt: transcript({ agent, conversation: conv, messages: history, agents: db.agents(), me: settings.workspaceName }),
+        prompt: transcript({ agent, conversation: conv, messages: history, agents: db.agents(), me: settings.workspaceName, task: opts.task }),
         cwd,
         signal: control.ctl.signal,
         mcpUrl: session?.url
@@ -316,7 +430,7 @@ export class Runner {
         : undefined
     if (receipt) db.addReceipt({ ...receipt, messageId: msg.id, agentId: agent.id, engine: engineId, at: Date.now() })
 
-    const base = { depth: opts.depth, receipt, question }
+    const base = { depth: opts.depth, receipt, question, approvalId: approval?.id }
     if (control.reason === 'stopped') {
       save({ run: { ...base, status: 'stopped', steps: closeThinking('error', 'Parado') } })
     } else if (control.reason === 'limit') {
@@ -328,15 +442,74 @@ export class Runner {
       // Streamed text keeps every model call of the turn; the final result may hold only the last one.
       save({
         text: msg.text.trim() ? msg.text : result.text,
-        run: { ...base, status: question ? 'waiting_input' : 'done', steps: closeThinking('done', 'Respondeu') }
+        run: { ...base, status: question ? 'waiting_input' : approval ? 'waiting_approval' : 'done', steps: closeThinking('done', 'Respondeu') }
       })
-      if (!question) this.chain(agent, conv, msg, opts.depth)
+      if (!question && !approval) this.chain(agent, conv, msg, opts.depth)
     } else {
       save({ run: { ...base, status: 'failed', steps: closeThinking('error', 'Falhou'), error: error ?? 'O motor terminou sem resposta.' } })
     }
 
     const updated = db.agent(agent.id)
     if (updated) emit({ type: 'agent', agent: updated })
+  }
+
+  // The first decision wins. Approving runs exactly the stored call (after
+  // checking the grant again); either way the agent gets a new turn with the outcome.
+  async decide(id: string, decision: 'approved' | 'refused' | 'expired', reason?: string): Promise<void> {
+    const { db, emit } = this.deps
+    const ap = db.approval(id)
+    if (!ap || ap.state !== 'pending' || !db.decideApproval(id, decision, reason)) return
+    const settings = await this.deps.settings()
+    const me = settings.workspaceName
+    const agent = db.agent(ap.agentId)
+    const conv = db.conversation(ap.conversationId)
+    const call = `"${ap.tool}" no ${ap.connectorName} com os argumentos ${canonical(ap.args)}`
+
+    let outcome: string
+    let task: string
+    if (decision === 'approved') {
+      const tool = db.tools(ap.connectorId).find((t) => t.name === ap.tool)
+      const connector = this.deps.connectors?.list().find((c) => c.id === ap.connectorId)
+      if (!agent || !connector || !tool || !allowed(tool, agent.grants[ap.connectorId])) {
+        outcome = 'Não executou: o acesso mudou depois do pedido.'
+        task = `${me} aprovou o seu pedido ${call}, mas o app não executou: o seu acesso a essa ferramenta mudou depois do pedido. Avise ${me} em uma frase.`
+      } else {
+        try {
+          const r = await this.deps.connectors!.call(ap.connectorId, ap.tool, ap.args)
+          outcome = r.isError ? 'Executou, com erro.' : 'Executou.'
+          task = `${me} aprovou o seu pedido ${call}. O app executou exatamente essa chamada${r.isError ? ' e ela devolveu um erro' : ''}. Resultado:\n${resultText(r)}\n\nContinue a partir daqui e conte o resultado a ${me}.`
+        } catch (e) {
+          const err = e instanceof Error ? e.message : String(e)
+          outcome = `Falhou: ${err}`
+          task = `${me} aprovou o seu pedido ${call}, mas a execução falhou: ${err}. Conte a ${me} e proponha o que fazer.`
+        }
+      }
+    } else if (decision === 'refused') {
+      outcome = 'Nada foi executado.'
+      task = `${me} recusou o seu pedido ${call}. ${reason ? `Motivo: "${reason}".` : 'Sem motivo informado.'} Nada foi executado. Responda considerando isso; se fizer sentido, proponha outro caminho.`
+    } else {
+      outcome = 'Expirou sem decisão.'
+      task = `O seu pedido ${call} expirou sem decisão de ${me}. Nada foi executado. Avise ${me} em uma frase.`
+    }
+    db.setApprovalOutcome(id, outcome)
+    emit({ type: 'approval', approval: db.approval(id)! })
+
+    const msg = db.message(ap.messageId)
+    if (msg?.run) {
+      const label = decision === 'approved' ? 'Aprovado' : decision === 'refused' ? 'Recusado' : 'Expirou'
+      this.update(msg, {
+        run: {
+          ...msg.run,
+          status: msg.run.status === 'waiting_approval' ? 'done' : msg.run.status,
+          steps: [...msg.run.steps, { id: randomUUID(), label, detail: outcome, status: decision === 'approved' && outcome.startsWith('Executou.') ? 'done' : 'error' }]
+        }
+      })
+    }
+    if (agent && conv && !agent.archived) this.enqueue(() => this.execute(agent, conv, { depth: 1, task }))
+  }
+
+  async expireApprovals(): Promise<void> {
+    for (const ap of this.deps.db.expiredApprovals()) await this.decide(ap.id, 'expired')
   }
 
   // An agent that mentions another agent of the conversation hands it the turn,

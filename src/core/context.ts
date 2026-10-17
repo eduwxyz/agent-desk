@@ -26,7 +26,8 @@ export function systemPrompt(opts: { agent: Agent; settings: Pick<Settings, 'wor
       peers.length > 0 &&
         '- Se outro agente do canal for mais indicado pra uma parte, mencione-o com @handle na sua resposta: ele responde em seguida. Só mencione quando precisar mesmo.',
       `- Se precisar de uma informação de ${me} pra continuar, use a ferramenta ask_user com uma pergunta curta e encerre a resposta. A resposta chega na próxima mensagem.`,
-      '- Fora isso, você não tem ferramentas: não consegue consultar sistemas, abrir PRs, ler arquivos nem rodar comandos. Não diga que fez nem que vai fazer essas coisas; se precisar delas, diga o que faria e peça o que falta.'
+      `- Suas outras ferramentas são as que ${me} liberou pra você. Ações sensíveis não rodam na hora: viram um pedido de aprovação, e você recebe o resultado depois da decisão.`,
+      '- Não tem shell nem acesso a arquivos. Não diga que fez algo que nenhuma ferramenta sua fez; se faltar uma ferramenta, diga o que faria e peça o que falta.'
     ]
       .filter(Boolean)
       .join('\n')
@@ -37,8 +38,9 @@ export function systemPrompt(opts: { agent: Agent; settings: Pick<Settings, 'wor
 
 const clock = (at: number): string => new Date(at).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
 
-export function transcript(opts: { agent: Agent; conversation: Conversation; messages: Message[]; agents: Agent[]; me: string }): string {
-  const { agent, conversation, messages, agents, me } = opts
+// `task` replaces the closing instruction, e.g. to continue after an approval.
+export function transcript(opts: { agent: Agent; conversation: Conversation; messages: Message[]; agents: Agent[]; me: string; task?: string }): string {
+  const { agent, conversation, messages, agents, me, task } = opts
   const name = (m: Message): string | null => {
     if (m.author.kind === 'me') return me
     if (m.author.kind === 'system') return null
@@ -56,7 +58,7 @@ export function transcript(opts: { agent: Agent; conversation: Conversation; mes
     .map((m) => `[${name(m)} · ${clock(m.at)}]\n${body(m)}`)
 
   const where = conversation.kind === 'dm' ? `DM com ${me}` : `#${conversation.name}`
-  return [`Conversa em ${where}, das mais antigas pras mais novas:`, ...lines, `Responda à última mensagem como ${agent.name}.`].join('\n\n')
+  return [`Conversa em ${where}, das mais antigas pras mais novas:`, ...lines, task ?? `Responda à última mensagem como ${agent.name}.`].join('\n\n')
 }
 
 // @handles in the text that belong to the given agents, in order of appearance.

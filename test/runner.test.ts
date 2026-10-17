@@ -38,7 +38,7 @@ const agentMessages = (): Message[] => db.messages().filter((m) => m.author.kind
 beforeEach(() => {
   db = new Db(join(mkdtempSync(join(tmpdir(), 'ad-db-')), 'test.db'))
   events = []
-  settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: ready }, routerModel: 'haiku', defaultLimit: 1000, theme: 'system' }
+  settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: ready }, routerModel: 'haiku', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system' }
   db.saveAgent(agent('a1', 'lia'))
   db.saveAgent(agent('a2', 'theo', { modelId: 'gpt-5.6-luna' }))
   db.createConversation({ id: 'd1', kind: 'dm', name: 'a1', members: ['a1'] })

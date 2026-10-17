@@ -2,7 +2,7 @@
 // Uses a fresh data directory and the fake engines, so nothing touches your
 // real database or spends your subscription. Pass --real to use the real CLIs.
 import { _electron as electron } from 'playwright'
-import { mkdirSync, mkdtempSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -11,6 +11,7 @@ const real = process.argv.includes('--real')
 mkdirSync(out, { recursive: true })
 
 const data = mkdtempSync(join(tmpdir(), 'agent-desk-'))
+for (const dir of [tmpdir(), '/tmp']) rmSync(join(dir, 'agent-desk-demo-tasks.json'), { force: true }) // the demo connector starts from its sample list
 const app = await electron.launch({
   args: ['.'],
   env: { ...process.env, AGENT_DESK_DATA: data, ...(real ? {} : { AGENT_DESK_FAKE_ENGINES: '1' }) }
@@ -63,6 +64,56 @@ await shot('06-handoff')
 
 await win.click('text=Uso e limites')
 await shot('07-uso')
+
+// ---------- M3: connector, grant, tools, approval ----------
+
+await win.click('.nav-item:has-text("Conectores")')
+await win.click('text=Adicionar conector')
+await win.click('button[role=radio]:has-text("Local")')
+await win.click('text=Preencher com o servidor de demonstração')
+await shot('08-novo-conector')
+await win.click('button:has-text("Conectar")')
+await win.waitForSelector('.connector .tag:has-text("conectado")', { timeout: 20_000 })
+await win.click('.connector__head')
+await shot('09-conector-ferramentas')
+
+// Give Lia read and write on it.
+await win.click('.section:has-text("Agentes") .nav-item:has-text("Lia")')
+await win.click('.grant:has-text("Tarefas") button:has-text("Ler e escrever")')
+await win.click('button:has-text("Salvar")')
+await win.waitForSelector('.saved')
+await shot('10-grant')
+
+await win.click('text=Abrir DM')
+await send('Liste as minhas tarefas.')
+await settle()
+await shot('11-consultou')
+
+await send('Apague a tarefa 2, por favor.')
+await settle()
+await win.waitForSelector('.approval', { timeout: real ? 60_000 : 5000 })
+await shot('12-pedido-de-aprovacao')
+
+await win.click('.approval button:has-text("Aprovar")')
+await settle()
+await shot('13-aprovado')
+
+await win.click('.nav-item:has-text("Aprovações")')
+await shot('14-aprovacoes')
+
+await win.click('.nav-item:has-text("Conectores")')
+await win.click('.connector__head')
+await shot('15-ferramenta-nova')
+
+// Theo (Codex) reads the same connector.
+await win.click('.section:has-text("Agentes") .nav-item:has-text("Theo")')
+await win.click('.grant:has-text("Tarefas") button:has-text("Ler"):not(:has-text("escrever"))')
+await win.click('button:has-text("Salvar")')
+await win.waitForSelector('.saved')
+await win.click('text=Abrir DM')
+await send('Quais tarefas ainda estão abertas?')
+await settle()
+await shot('16-codex-consultou')
 
 console.log(errors.length ? `ERRORS:\n${errors.join('\n')}` : 'no console errors')
 console.log(`data: ${data}`)

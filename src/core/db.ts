@@ -1,5 +1,5 @@
 import { DatabaseSync } from 'node:sqlite'
-import type { Agent, AgentColor, Author, Conversation, Effort, Message, Receipt, Run, Settings } from '../shared/types'
+import type { Agent, AgentColor, Approval, ApprovalState, Author, Connector, ConnectorAuth, ConnectorTool, Conversation, Effort, Message, Receipt, Run, Settings, ToolClass } from '../shared/types'
 
 // Each entry runs once, in order; PRAGMA user_version records how far we got.
 const MIGRATIONS = [
@@ -55,6 +55,53 @@ const MIGRATIONS = [
     at INTEGER NOT NULL
   );
   CREATE INDEX receipts_by_agent ON receipts (agent_id, at);
+  `,
+  `
+  CREATE TABLE connectors (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    kind TEXT NOT NULL CHECK (kind IN ('remote', 'stdio')),
+    url TEXT,
+    command TEXT,
+    args TEXT NOT NULL DEFAULT '[]',
+    env_keys TEXT NOT NULL DEFAULT '[]',
+    auth TEXT NOT NULL DEFAULT 'none',
+    synced INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL
+  );
+  CREATE TABLE connector_tools (
+    connector_id TEXT NOT NULL REFERENCES connectors(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    input_schema TEXT NOT NULL DEFAULT '{}',
+    cls TEXT NOT NULL,
+    enabled INTEGER NOT NULL,
+    high_risk INTEGER NOT NULL DEFAULT 0,
+    is_new INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (connector_id, name)
+  );
+  CREATE TABLE approvals (
+    id TEXT PRIMARY KEY,
+    hash TEXT NOT NULL,
+    agent_id TEXT NOT NULL,
+    conversation_id TEXT NOT NULL,
+    message_id TEXT NOT NULL,
+    connector_id TEXT NOT NULL,
+    connector_name TEXT NOT NULL,
+    tool TEXT NOT NULL,
+    args TEXT NOT NULL,
+    why TEXT NOT NULL DEFAULT '',
+    high_risk INTEGER NOT NULL DEFAULT 0,
+    state TEXT NOT NULL DEFAULT 'pending',
+    reason TEXT,
+    outcome TEXT,
+    created_at INTEGER NOT NULL,
+    expires_at INTEGER NOT NULL,
+    decided_at INTEGER
+  );
+  CREATE INDEX approvals_by_state ON approvals (state, created_at);
+  -- Encrypted by the OS keychain (Electron safeStorage) before they get here.
+  CREATE TABLE secrets (key TEXT PRIMARY KEY, value TEXT NOT NULL);
   `
 ]
 
@@ -269,6 +316,164 @@ export class Db {
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .run(r.messageId, r.agentId, r.engine, r.model, r.inputTokens, r.cacheReadTokens, r.outputTokens, r.ms, r.apiCostUsd ?? null, r.at)
+  }
+
+  // ---------- connectors ----------
+
+  // Status is runtime state; the manager fills it in.
+  connectors(): Omit<Connector, 'status' | 'error'>[] {
+    const rows = this.db.prepare('SELECT * FROM connectors ORDER BY created_at').all() as Row[]
+    return rows.map((r) => this.toConnector(r))
+  }
+
+  connector(id: string): (Omit<Connector, 'status' | 'error'> & { synced: boolean }) | undefined {
+    const r = this.db.prepare('SELECT * FROM connectors WHERE id = ?').get(id) as Row | undefined
+    return r && { ...this.toConnector(r), synced: r['synced'] === 1 }
+  }
+
+  private toConnector(r: Row): Omit<Connector, 'status' | 'error'> {
+    const id = str(r['id'])
+    return {
+      id,
+      name: str(r['name']),
+      kind: str(r['kind']) as Connector['kind'],
+      url: r['url'] ? str(r['url']) : undefined,
+      command: r['command'] ? str(r['command']) : undefined,
+      args: JSON.parse(str(r['args']) || '[]') as string[],
+      envKeys: JSON.parse(str(r['env_keys']) || '[]') as string[],
+      auth: str(r['auth']) as ConnectorAuth,
+      tools: this.tools(id).map(({ inputSchema: _, ...t }) => t)
+    }
+  }
+
+  saveConnector(c: { id: string; name: string; kind: Connector['kind']; url?: string; command?: string; args?: string[]; envKeys?: string[]; auth: ConnectorAuth }): void {
+    this.db
+      .prepare(
+        `INSERT INTO connectors (id, name, kind, url, command, args, env_keys, auth, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (id) DO UPDATE SET name = excluded.name, url = excluded.url, command = excluded.command,
+           args = excluded.args, env_keys = excluded.env_keys, auth = excluded.auth`
+      )
+      .run(c.id, c.name, c.kind, c.url ?? null, c.command ?? null, JSON.stringify(c.args ?? []), JSON.stringify(c.envKeys ?? []), c.auth, Date.now())
+  }
+
+  removeConnector(id: string): void {
+    this.tx(() => {
+      this.db.prepare('DELETE FROM connectors WHERE id = ?').run(id)
+      this.db.prepare("DELETE FROM secrets WHERE key LIKE ?").run(`connector:${id}:%`)
+    })
+  }
+
+  tools(connectorId: string): (ConnectorTool & { inputSchema: Record<string, unknown> })[] {
+    const rows = this.db.prepare('SELECT * FROM connector_tools WHERE connector_id = ? ORDER BY rowid').all(connectorId) as Row[]
+    return rows.map((r) => ({
+      name: str(r['name']),
+      description: str(r['description']),
+      inputSchema: JSON.parse(str(r['input_schema']) || '{}') as Record<string, unknown>,
+      cls: str(r['cls']) as ToolClass,
+      enabled: r['enabled'] === 1,
+      highRisk: r['high_risk'] === 1,
+      isNew: r['is_new'] === 1
+    }))
+  }
+
+  // Applies the server's current tool list. On the first sync every tool comes
+  // in enabled; afterwards, tools the server adds come in disabled and flagged.
+  syncTools(connectorId: string, listed: { name: string; description: string; inputSchema: Record<string, unknown>; cls: ToolClass }[]): void {
+    this.tx(() => {
+      const first = !(this.db.prepare('SELECT synced FROM connectors WHERE id = ?').get(connectorId) as { synced: number } | undefined)?.synced
+      const known = new Set(this.tools(connectorId).map((t) => t.name))
+      for (const t of listed) {
+        if (known.has(t.name)) {
+          this.db.prepare('UPDATE connector_tools SET description = ?, input_schema = ? WHERE connector_id = ? AND name = ?').run(t.description, JSON.stringify(t.inputSchema), connectorId, t.name)
+        } else {
+          this.db
+            .prepare('INSERT INTO connector_tools (connector_id, name, description, input_schema, cls, enabled, high_risk, is_new) VALUES (?, ?, ?, ?, ?, ?, 0, ?)')
+            .run(connectorId, t.name, t.description, JSON.stringify(t.inputSchema), t.cls, first ? 1 : 0, first ? 0 : 1)
+        }
+      }
+      const names = new Set(listed.map((t) => t.name))
+      for (const name of known) if (!names.has(name)) this.db.prepare('DELETE FROM connector_tools WHERE connector_id = ? AND name = ?').run(connectorId, name)
+      this.db.prepare('UPDATE connectors SET synced = 1 WHERE id = ?').run(connectorId)
+    })
+  }
+
+  // Any review clears the "new" flag.
+  updateTool(connectorId: string, name: string, patch: Partial<Pick<ConnectorTool, 'cls' | 'enabled' | 'highRisk'>>): void {
+    const t = this.tools(connectorId).find((x) => x.name === name)
+    if (!t) return
+    const next = { ...t, ...patch }
+    this.db
+      .prepare('UPDATE connector_tools SET cls = ?, enabled = ?, high_risk = ?, is_new = 0 WHERE connector_id = ? AND name = ?')
+      .run(next.cls, next.enabled ? 1 : 0, next.highRisk ? 1 : 0, connectorId, name)
+  }
+
+  // ---------- secrets (already encrypted by the caller) ----------
+
+  getSecret(key: string): string | undefined {
+    return (this.db.prepare('SELECT value FROM secrets WHERE key = ?').get(key) as { value: string } | undefined)?.value
+  }
+
+  setSecret(key: string, value: string | undefined): void {
+    if (value === undefined) this.db.prepare('DELETE FROM secrets WHERE key = ?').run(key)
+    else this.db.prepare('INSERT INTO secrets (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value').run(key, value)
+  }
+
+  // ---------- approvals ----------
+
+  private toApproval(r: Row): Approval {
+    return {
+      id: str(r['id']),
+      hash: str(r['hash']),
+      agentId: str(r['agent_id']),
+      conversationId: str(r['conversation_id']),
+      messageId: str(r['message_id']),
+      connectorId: str(r['connector_id']),
+      connectorName: str(r['connector_name']),
+      tool: str(r['tool']),
+      args: JSON.parse(str(r['args'])) as Record<string, unknown>,
+      why: str(r['why']),
+      highRisk: r['high_risk'] === 1,
+      state: str(r['state']) as ApprovalState,
+      reason: r['reason'] ? str(r['reason']) : undefined,
+      outcome: r['outcome'] ? str(r['outcome']) : undefined,
+      createdAt: Number(r['created_at']),
+      expiresAt: Number(r['expires_at']),
+      decidedAt: r['decided_at'] ? Number(r['decided_at']) : undefined
+    }
+  }
+
+  approvals(): Approval[] {
+    return (this.db.prepare('SELECT * FROM approvals ORDER BY created_at').all() as Row[]).map((r) => this.toApproval(r))
+  }
+
+  approval(id: string): Approval | undefined {
+    const r = this.db.prepare('SELECT * FROM approvals WHERE id = ?').get(id) as Row | undefined
+    return r && this.toApproval(r)
+  }
+
+  createApproval(a: Approval): void {
+    this.db
+      .prepare(
+        `INSERT INTO approvals (id, hash, agent_id, conversation_id, message_id, connector_id, connector_name, tool, args, why, high_risk, state, created_at, expires_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      )
+      .run(a.id, a.hash, a.agentId, a.conversationId, a.messageId, a.connectorId, a.connectorName, a.tool, JSON.stringify(a.args), a.why, a.highRisk ? 1 : 0, a.state, a.createdAt, a.expiresAt)
+  }
+
+  // Only a pending approval can be decided, so the first decision wins.
+  decideApproval(id: string, state: Exclude<ApprovalState, 'pending'>, reason?: string): boolean {
+    const r = this.db
+      .prepare("UPDATE approvals SET state = ?, reason = ?, decided_at = ? WHERE id = ? AND state = 'pending'")
+      .run(state, reason ?? null, Date.now(), id)
+    return Number(r.changes) === 1
+  }
+
+  setApprovalOutcome(id: string, outcome: string): void {
+    this.db.prepare('UPDATE approvals SET outcome = ? WHERE id = ?').run(outcome, id)
+  }
+
+  expiredApprovals(now = Date.now()): Approval[] {
+    return (this.db.prepare("SELECT * FROM approvals WHERE state = 'pending' AND expires_at <= ?").all(now) as Row[]).map((r) => this.toApproval(r))
   }
 
   receiptTotals(messageId: string): { tokens: number } {

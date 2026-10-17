@@ -16,8 +16,9 @@ export async function* runCli(opts: {
   cwd: string
   signal: AbortSignal
   parser: Parser
+  env?: NodeJS.ProcessEnv
 }): AsyncIterable<EngineEvent> {
-  const child = spawn(opts.bin, opts.args, { cwd: opts.cwd, stdio: ['pipe', 'pipe', 'pipe'], env: process.env })
+  const child = spawn(opts.bin, opts.args, { cwd: opts.cwd, stdio: ['pipe', 'pipe', 'pipe'], env: opts.env ?? process.env })
   const kill = (): void => {
     child.kill('SIGTERM')
   }
