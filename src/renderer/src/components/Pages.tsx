@@ -1,0 +1,674 @@
+import { useEffect, useState, type ReactNode } from 'react'
+import {
+  agentById,
+  navigate,
+  newAgentDraft,
+  openDm,
+  saveAgent,
+  setAgentChannels,
+  setGrant,
+  setToolClass,
+  updateSettings,
+  useStore,
+  EFFORTS,
+  ENGINES,
+  type Agent,
+  type AgentColor,
+  type EngineId,
+  type GrantLevel,
+  type ToolClass
+} from '../store'
+import { ApprovalCard } from './Conversation'
+import { AgentAvatar, Icon, time, tokens, UsageBar, usd } from './ui'
+
+function Page({ title, subtitle, actions, children }: { title: ReactNode; subtitle?: ReactNode; actions?: ReactNode; children: ReactNode }): ReactNode {
+  return (
+    <section className="page">
+      <header className="topbar">
+        <div className="topbar__title">
+          <h1>{title}</h1>
+        </div>
+        <div className="topbar__actions">{actions}</div>
+      </header>
+      <div className="page__scroll">
+        <div className="page__inner">
+          {subtitle && <p className="page__subtitle">{subtitle}</p>}
+          {children}
+        </div>
+      </div>
+    </section>
+  )
+}
+
+// ---------- Agent profile / creation ----------
+
+const COLORS: AgentColor[] = ['sky', 'indigo', 'violet', 'rose', 'amber', 'green', 'teal', 'graphite']
+const LEVELS: { value: GrantLevel; label: string }[] = [
+  { value: 'none', label: 'Sem acesso' },
+  { value: 'read', label: 'Ler' },
+  { value: 'read_write', label: 'Ler e escrever' }
+]
+
+export function AgentPage({ id }: { id?: string }): ReactNode {
+  const existing = useStore((s) => (id ? agentById(s, id) : undefined))
+  const models = useStore((s) => s.models)
+  const engines = useStore((s) => s.settings.engines)
+  const connectors = useStore((s) => s.connectors)
+  const channels = useStore((s) => s.conversations.filter((c) => c.kind === 'channel'))
+  const handles = useStore((s) => s.agents.map((a) => [a.id, a.handle] as const))
+
+  const [draft, setDraft] = useState<Agent>(() => existing ?? newAgentDraft())
+  const [chosen, setChosen] = useState<string[]>(() => (id ? channels.filter((c) => c.members.includes(id)).map((c) => c.id) : []))
+  const [saved, setSaved] = useState(false)
+
+  useEffect(() => {
+    if (existing) {
+      setDraft(existing)
+      setChosen(channels.filter((c) => c.members.includes(existing.id)).map((c) => c.id))
+    }
+    // Only reset when switching agents, not on every store change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id])
+
+  const isNew = !existing
+  const handleError = !/^[a-z0-9][a-z0-9_-]{1,31}$/.test(draft.handle)
+    ? 'Use 2 a 32 letras minúsculas, números, - ou _.'
+    : handles.some(([aid, h]) => h === draft.handle && aid !== draft.id)
+      ? `@${draft.handle} já existe.`
+      : null
+  const canSave = draft.name.trim().length > 0 && !handleError
+  const patch = (p: Partial<Agent>): void => {
+    setDraft((d) => ({ ...d, ...p }))
+    setSaved(false)
+  }
+
+  const save = (): void => {
+    if (!canSave) return
+    saveAgent(draft)
+    setAgentChannels(draft.id, chosen)
+    Object.entries(draft.grants).forEach(([c, lvl]) => setGrant(draft.id, c, lvl))
+    if (isNew) navigate({ kind: 'agent', id: draft.id })
+    else setSaved(true)
+  }
+
+  const model = models.find((m) => m.id === draft.modelId)
+  const engine: EngineId = model?.engine ?? 'claude'
+  const engineStatus = engines[engine]
+  const pickEngine = (e: EngineId): void => {
+    if (e !== engine) patch({ modelId: models.find((m) => m.engine === e)!.id })
+  }
+
+  return (
+    <Page
+      title={
+        <span className="row row--center">
+          <AgentAvatar agent={{ name: draft.name || '?', color: draft.color }} size={26} />
+          {isNew ? 'Novo agente' : draft.name}
+        </span>
+      }
+      actions={
+        <>
+          {!isNew && (
+            <button className="btn btn--ghost" onClick={() => openDm(draft.id)}>
+              Abrir DM
+            </button>
+          )}
+          {saved && <span className="saved">Salvo</span>}
+          <button className="btn btn--primary" disabled={!canSave} onClick={save}>
+            {isNew ? 'Criar agente' : 'Salvar'}
+          </button>
+        </>
+      }
+    >
+      <div className="agent-layout">
+        <div className="agent-form">
+          <Card title="Identidade" lead="Como você chama e reconhece o agente no chat.">
+            <div className="grid2">
+              <Field label="Nome">
+                <input value={draft.name} placeholder="Ex.: Lia" onChange={(e) => patch({ name: e.target.value })} />
+              </Field>
+              <Field label="@handle" error={draft.handle ? handleError : null}>
+                <input
+                  value={draft.handle}
+                  placeholder="lia"
+                  onChange={(e) => patch({ handle: e.target.value.toLowerCase().replace(/\s/g, '') })}
+                />
+              </Field>
+            </div>
+            <Field label="Papel" hint="Uma linha. O router usa isso pra decidir quem responde.">
+              <input value={draft.role} placeholder="Ex.: Engenharia" onChange={(e) => patch({ role: e.target.value })} />
+            </Field>
+            <Field label="Cor">
+              <div className="swatches">
+                {COLORS.map((c) => (
+                  <button
+                    key={c}
+                    className={`swatch c-${c} ${draft.color === c ? 'is-active' : ''}`}
+                    onClick={() => patch({ color: c })}
+                    aria-label={c}
+                  />
+                ))}
+              </div>
+            </Field>
+          </Card>
+
+          <Card title="Instruções" lead="Escreva como escreveria pra um colega novo: o que fazer, o que evitar, quando perguntar.">
+            <textarea
+              rows={6}
+              value={draft.instructions}
+              placeholder="Ex.: Responde dúvidas no #suporte com base na documentação. Quando não souber, chama alguém."
+              onChange={(e) => patch({ instructions: e.target.value })}
+            />
+            <p className="hint">O contexto do workspace já entra em toda conversa. Aqui vai só o que é deste agente.</p>
+          </Card>
+
+          <Card title="Onde participa">
+            <div className="checks">
+              {channels.map((c) => (
+                <label key={c.id} className="check">
+                  <input
+                    type="checkbox"
+                    checked={chosen.includes(c.id)}
+                    onChange={(e) => {
+                      setChosen(e.target.checked ? [...chosen, c.id] : chosen.filter((x) => x !== c.id))
+                      setSaved(false)
+                    }}
+                  />
+                  <Icon name="hash" size={14} /> {c.name}
+                </label>
+              ))}
+            </div>
+            <p className="hint">Fora desses canais, chame com @{draft.handle || 'handle'} ou mande DM.</p>
+          </Card>
+
+          <Card title="Ferramentas e acesso" lead="Um nível por conector. O que fica de fora nem aparece pro modelo.">
+            <div className="grants">
+              {connectors.map((c) => {
+                const level = draft.grants[c.id] ?? 'none'
+                const sensitive = c.tools.filter((t) => t.cls === 'sensitive' && t.enabled)
+                return (
+                  <div key={c.id} className="grant">
+                    <div className="grant__name">
+                      <Icon name={c.kind === 'stdio' ? 'terminal' : 'globe'} />
+                      <div>
+                        <strong>{c.name}</strong>
+                        <span className="muted small">
+                          {level === 'none'
+                            ? 'Nenhuma ferramenta exposta'
+                            : level === 'read'
+                              ? `${c.tools.filter((t) => t.cls === 'read' && t.enabled).length} ferramentas de leitura`
+                              : `${c.tools.filter((t) => t.enabled).length} ferramentas${sensitive.length ? ` · ${sensitive.length} pedem aprovação` : ''}`}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="segmented">
+                      {LEVELS.map((l) => (
+                        <button
+                          key={l.value}
+                          className={level === l.value ? 'is-active' : ''}
+                          onClick={() => patch({ grants: { ...draft.grants, [c.id]: l.value } })}
+                        >
+                          {l.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+            <p className="hint">
+              <Icon name="shield" size={13} /> Ferramentas sensíveis (merge, deploy, apagar, enviar) sempre viram pedido de aprovação no chat.
+            </p>
+          </Card>
+
+          <Card title="Motor e modelo" lead="O agente roda na CLI que você já usa, com a sua assinatura. Sem chave de API, sem cobrança por uso.">
+            <div className="segmented segmented--wide" role="radiogroup" aria-label="Motor">
+              {(Object.keys(ENGINES) as EngineId[]).map((e) => (
+                <button key={e} role="radio" aria-checked={engine === e} className={engine === e ? 'is-active' : ''} onClick={() => pickEngine(e)}>
+                  {ENGINES[e].label}
+                </button>
+              ))}
+            </div>
+            {!engineStatus.loggedIn && (
+              <p className="hint hint--warn">
+                <Icon name="lock" size={13} /> O {ENGINES[engine].label} não está logado.{' '}
+                <button className="link" onClick={() => navigate({ kind: 'settings' })}>
+                  Entrar em Configurações
+                </button>
+              </p>
+            )}
+            <div className="models">
+              {models
+                .filter((m) => m.engine === engine)
+                .map((m) => (
+                  <label key={m.id} className={`model ${draft.modelId === m.id ? 'is-active' : ''}`}>
+                    <input type="radio" name="model" checked={draft.modelId === m.id} onChange={() => patch({ modelId: m.id })} />
+                    <strong>{m.label}</strong>
+                    <span className="muted small">{m.hint}</span>
+                  </label>
+                ))}
+            </div>
+            <div className="grid2">
+              <Field label="Esforço de raciocínio" hint="Mais esforço pensa mais e gasta mais do plano.">
+                <select value={draft.effort} onChange={(e) => patch({ effort: e.target.value as Agent['effort'] })}>
+                  {EFFORTS.map((ef) => (
+                    <option key={ef.id} value={ef.id}>
+                      {ef.label}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+              <Field label="Limite mensal (milhões de tokens)" hint={`Conferido antes de cada turno. No limite, ${draft.name || 'o agente'} para e avisa.`}>
+                <input
+                  type="number"
+                  min={0}
+                  step={0.5}
+                  value={draft.limit / 1_000_000}
+                  onChange={(e) => patch({ limit: Math.max(0, Math.round(Number(e.target.value) * 1_000_000)) })}
+                  className="input--short"
+                />
+              </Field>
+            </div>
+          </Card>
+        </div>
+
+        <aside className="agent-side">
+          <div className="profile-card">
+            <AgentAvatar agent={{ name: draft.name || '?', color: draft.color }} size={72} />
+            <strong className="profile-card__name">{draft.name || 'Sem nome'}</strong>
+            <span className="muted">@{draft.handle || 'handle'}</span>
+            {draft.role && <span className="tag">{draft.role}</span>}
+            <div className="profile-card__rows">
+              <div>
+                <span className="muted small">Motor</span>
+                <span>{ENGINES[engine].label}</span>
+              </div>
+              <div>
+                <span className="muted small">Modelo</span>
+                <span>{model?.label}</span>
+              </div>
+              <div>
+                <span className="muted small">Canais</span>
+                <span>{chosen.length || '—'}</span>
+              </div>
+              <div>
+                <span className="muted small">Conectores</span>
+                <span>{Object.values(draft.grants).filter((g) => g !== 'none').length || '—'}</span>
+              </div>
+            </div>
+            {!isNew && (
+              <div className="profile-card__budget">
+                <span className="muted small">Uso em {new Date().toLocaleDateString('pt-BR', { month: 'long' })}</span>
+                <span>
+                  <strong>{tokens(draft.used)}</strong> <span className="muted">de {tokens(draft.limit)} tokens</span>
+                </span>
+                <UsageBar used={draft.used} limit={draft.limit} />
+              </div>
+            )}
+          </div>
+        </aside>
+      </div>
+    </Page>
+  )
+}
+
+function Card({ title, lead, children }: { title: string; lead?: string; children: ReactNode }): ReactNode {
+  return (
+    <div className="card">
+      <div className="card__head">
+        <h2>{title}</h2>
+        {lead && <p className="muted">{lead}</p>}
+      </div>
+      {children}
+    </div>
+  )
+}
+
+function Field({ label, hint, error, children }: { label: string; hint?: string; error?: string | null; children: ReactNode }): ReactNode {
+  return (
+    <label className={`field ${error ? 'has-error' : ''}`}>
+      <span className="field__label">{label}</span>
+      {children}
+      {error ? <span className="field__error">{error}</span> : hint ? <span className="hint">{hint}</span> : null}
+    </label>
+  )
+}
+
+// ---------- Approvals ----------
+
+export function ApprovalsPage(): ReactNode {
+  const approvals = useStore((s) => s.approvals)
+  const pending = approvals.filter((a) => a.state === 'pending')
+  const past = approvals.filter((a) => a.state !== 'pending').sort((a, b) => (b.decidedAt ?? 0) - (a.decidedAt ?? 0))
+  const conversations = useStore((s) => s.conversations)
+
+  return (
+    <Page title="Aprovações" subtitle="Nada sensível acontece sem você. Cada aprovação cobre uma ação exata.">
+      {pending.length === 0 ? (
+        <div className="empty empty--card">
+          <Icon name="shield" size={22} />
+          <p>Nada esperando por você.</p>
+          <p className="muted">Quando um agente quiser mergear, fazer deploy, apagar ou enviar algo pra fora, o pedido aparece aqui e na conversa.</p>
+        </div>
+      ) : (
+        <div className="stack-list">
+          {pending.map((a) => {
+            const conv = conversations.find((c) => c.id === a.conversationId)
+            return (
+              <div key={a.id}>
+                <div className="row row--between small muted list-meta">
+                  <span>
+                    em {conv?.kind === 'channel' ? `#${conv.name}` : 'DM'} · {time(a.createdAt)}
+                  </span>
+                  <button className="link" onClick={() => navigate({ kind: 'conversation', id: a.conversationId })}>
+                    Ver na conversa
+                  </button>
+                </div>
+                <ApprovalCard approval={a} />
+              </div>
+            )
+          })}
+        </div>
+      )}
+
+      {past.length > 0 && (
+        <>
+          <h3 className="section-title">Histórico</h3>
+          <div className="table">
+            {past.map((a) => (
+              <HistoryRow key={a.id} id={a.id} />
+            ))}
+          </div>
+        </>
+      )}
+    </Page>
+  )
+}
+
+function HistoryRow({ id }: { id: string }): ReactNode {
+  const a = useStore((s) => s.approvals.find((x) => x.id === id)!)
+  const agent = useStore((s) => agentById(s, a.agentId))
+  return (
+    <div className="table__row">
+      {agent && <AgentAvatar agent={agent} size={22} />}
+      <span className="grow">{a.title}</span>
+      <span className={`tag ${a.state === 'approved' ? 'tag--ok' : 'tag--danger'}`}>{a.state === 'approved' ? 'aprovado' : a.state === 'refused' ? 'recusado' : 'expirado'}</span>
+      <span className="muted small">{a.decidedAt ? time(a.decidedAt) : ''}</span>
+    </div>
+  )
+}
+
+// ---------- Usage ----------
+
+export function UsagePage(): ReactNode {
+  const agents = useStore((s) => s.agents.filter((a) => !a.archived))
+  const messages = useStore((s) => s.messages.filter((m) => m.run?.receipt))
+  const total = agents.reduce((acc, a) => acc + a.used, 0)
+  const apiEquivalent = messages.reduce((acc, m) => acc + (m.run!.receipt!.apiCostUsd ?? 0), 0)
+  const month = new Date().toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })
+
+  return (
+    <Page title="Uso e limites" subtitle="Tudo roda nas suas assinaturas. Cada turno gera um recibo, e o limite de cada agente é conferido antes do turno, não depois.">
+      <div className="kpis">
+        <div className="kpi">
+          <span className="muted small">Tokens em {month}</span>
+          <strong>{tokens(total)}</strong>
+        </div>
+        <div className="kpi">
+          <span className="muted small">Equivalente na API</span>
+          <strong>{usd(apiEquivalent)}</strong>
+          <span className="muted small">só Claude Code informa · não é cobrado</span>
+        </div>
+        <div className="kpi">
+          <span className="muted small">Execuções no mês</span>
+          <strong>{messages.length}</strong>
+        </div>
+      </div>
+
+      <h3 className="section-title">Por agente</h3>
+      <div className="table">
+        {agents.map((a) => {
+          const pct = a.limit > 0 ? (a.used / a.limit) * 100 : 100
+          return (
+            <button key={a.id} className="table__row table__row--btn" onClick={() => navigate({ kind: 'agent', id: a.id })}>
+              <AgentAvatar agent={a} size={24} />
+              <span className="usage__name">
+                <strong>{a.name}</strong>
+                <span className="muted small">
+                  <ModelLabel id={a.modelId} />
+                </span>
+              </span>
+              <span className="usage__bar">
+                <UsageBar used={a.used} limit={a.limit} />
+              </span>
+              <span className="usage__num">
+                {tokens(a.used)} <span className="muted">de {tokens(a.limit)}</span>
+              </span>
+              <span className={`usage__pct ${pct >= 80 ? 'is-warn' : ''}`}>{Math.round(pct)}%</span>
+            </button>
+          )
+        })}
+      </div>
+
+      <h3 className="section-title">Recibos recentes</h3>
+      <div className="table">
+        {[...messages]
+          .sort((a, b) => b.at - a.at)
+          .slice(0, 12)
+          .map((m) => (
+            <ReceiptRow key={m.id} id={m.id} />
+          ))}
+      </div>
+    </Page>
+  )
+}
+
+function ModelLabel({ id }: { id: string }): ReactNode {
+  const m = useStore((s) => s.models.find((x) => x.id === id))
+  return <>{m ? `${ENGINES[m.engine].label} · ${m.label}` : id}</>
+}
+
+function ReceiptRow({ id }: { id: string }): ReactNode {
+  const m = useStore((s) => s.messages.find((x) => x.id === id)!)
+  const agent = useStore((s) => (m.author.kind === 'agent' ? agentById(s, m.author.id) : undefined))
+  const conv = useStore((s) => s.conversations.find((c) => c.id === m.conversationId))
+  const r = m.run!.receipt!
+  return (
+    <button className="table__row table__row--btn" onClick={() => navigate({ kind: 'conversation', id: m.conversationId })}>
+      {agent && <AgentAvatar agent={agent} size={20} />}
+      <span className="grow truncate">{m.text.split('\n')[0] || '—'}</span>
+      <span className="muted small">{conv?.kind === 'channel' ? `#${conv.name}` : 'DM'}</span>
+      <span className="muted small">
+        <ModelLabel id={r.model} />
+      </span>
+      <span className="mono small">{tokens(r.inputTokens + r.outputTokens)}</span>
+      <span className="muted small">{time(m.at)}</span>
+    </button>
+  )
+}
+
+// ---------- Connectors ----------
+
+const CLASS_LABEL: Record<ToolClass, string> = { read: 'leitura', write: 'escrita', sensitive: 'sensível' }
+
+export function ConnectorsPage(): ReactNode {
+  const connectors = useStore((s) => s.connectors)
+  const agents = useStore((s) => s.agents)
+  const [openId, setOpenId] = useState<string | null>(connectors[0]?.id ?? null)
+
+  return (
+    <Page
+      title="Conectores"
+      subtitle="Servidores MCP conectados uma vez. Depois você escolhe o que cada agente pode usar."
+      actions={
+        <button className="btn btn--primary">
+          <Icon name="plus" size={14} /> Adicionar conector
+        </button>
+      }
+    >
+      <div className="stack-list">
+        {connectors.map((c) => {
+          const users = agents.filter((a) => (a.grants[c.id] ?? 'none') !== 'none')
+          const open = openId === c.id
+          return (
+            <div key={c.id} className={`card connector ${open ? 'is-open' : ''}`}>
+              <button className="connector__head" onClick={() => setOpenId(open ? null : c.id)}>
+                <span className="connector__icon">
+                  <Icon name={c.kind === 'stdio' ? 'terminal' : 'globe'} />
+                </span>
+                <span className="grow">
+                  <strong>{c.name}</strong>
+                  <span className="muted small mono truncate">{c.address}</span>
+                </span>
+                <span className={`tag ${c.status === 'connected' ? 'tag--ok' : 'tag--warn'}`}>
+                  {c.status === 'connected' ? 'conectado' : 'precisa reconectar'}
+                </span>
+                <span className="stack">
+                  {users.map((a) => (
+                    <span key={a.id} className="stack__item">
+                      <AgentAvatar agent={a} size={20} />
+                    </span>
+                  ))}
+                </span>
+                <span className={`chev ${open ? 'is-open' : ''}`}>
+                  <Icon name="chevron" size={14} />
+                </span>
+              </button>
+              {open && (
+                <div className="tools">
+                  {c.kind === 'stdio' && (
+                    <p className="warn-box">
+                      <Icon name="terminal" size={14} /> Conector local: roda um processo no seu computador com o seu usuário.
+                    </p>
+                  )}
+                  <div className="tools__head small muted">
+                    <span>Ferramenta</span>
+                    <span>Classe</span>
+                    <span>Alto risco</span>
+                    <span>Ligada</span>
+                  </div>
+                  {c.tools.map((t) => (
+                    <div key={t.name} className={`tools__row ${t.enabled ? '' : 'is-off'}`}>
+                      <code>{t.name}</code>
+                      <select value={t.cls} onChange={(e) => setToolClass(c.id, t.name, { cls: e.target.value as ToolClass })}>
+                        {(Object.keys(CLASS_LABEL) as ToolClass[]).map((k) => (
+                          <option key={k} value={k}>
+                            {CLASS_LABEL[k]}
+                          </option>
+                        ))}
+                      </select>
+                      <input
+                        type="checkbox"
+                        disabled={t.cls !== 'sensitive'}
+                        checked={!!t.highRisk && t.cls === 'sensitive'}
+                        onChange={(e) => setToolClass(c.id, t.name, { highRisk: e.target.checked })}
+                      />
+                      <Toggle on={t.enabled} onChange={(v) => setToolClass(c.id, t.name, { enabled: v })} />
+                    </div>
+                  ))}
+                  <p className="hint">Ferramentas novas que o servidor publicar depois entram desligadas até você revisar.</p>
+                </div>
+              )}
+            </div>
+          )
+        })}
+      </div>
+    </Page>
+  )
+}
+
+function Toggle({ on, onChange }: { on: boolean; onChange: (v: boolean) => void }): ReactNode {
+  return <button className={`toggle ${on ? 'is-on' : ''}`} role="switch" aria-checked={on} onClick={() => onChange(!on)} />
+}
+
+// ---------- Settings ----------
+
+export function SettingsPage(): ReactNode {
+  const settings = useStore((s) => s.settings)
+  const models = useStore((s) => s.models)
+  return (
+    <Page title="Configurações">
+      <div className="agent-form">
+        <Card title="Workspace">
+          <Field label="Nome">
+            <input value={settings.workspaceName} onChange={(e) => updateSettings({ workspaceName: e.target.value })} />
+          </Field>
+          <Field label="Contexto" hint="Entra em toda conversa de todo agente: quem você é, o que faz, o que importa agora e o que nunca fazer.">
+            <textarea rows={5} value={settings.context} onChange={(e) => updateSettings({ context: e.target.value })} />
+          </Field>
+        </Card>
+
+        <Card title="Motores" lead="Os agentes rodam nas CLIs instaladas aqui, com o login de cada uma. O app nunca vê nem guarda suas credenciais.">
+          {(Object.keys(ENGINES) as EngineId[]).map((e) => {
+            const st = settings.engines[e]
+            return (
+              <div key={e} className="key-row">
+                <Icon name="terminal" />
+                <div className="grow">
+                  <strong>
+                    {ENGINES[e].label}{' '}
+                    <span className={`tag ${st.loggedIn ? 'tag--ok' : st.installed ? 'tag--warn' : 'tag--danger'}`}>
+                      {st.loggedIn ? 'pronto' : st.installed ? 'não logado' : 'não instalado'}
+                    </span>
+                  </strong>
+                  <span className="muted small">
+                    {st.installed ? (
+                      <>
+                        <span className="mono">{st.path}</span> · v{st.version}
+                        {st.loggedIn && st.account ? ` · ${st.account}` : ''}
+                      </>
+                    ) : (
+                      `Instale a CLI ${ENGINES[e].cli} e volte aqui.`
+                    )}
+                  </span>
+                </div>
+                {st.installed && (
+                  <button
+                    className="btn"
+                    title={`Abre o Terminal com: ${ENGINES[e].login}`}
+                    onClick={() => updateSettings({ engines: { ...settings.engines, [e]: { ...st, loggedIn: !st.loggedIn } } })}
+                  >
+                    {st.loggedIn ? 'Trocar conta' : 'Entrar'}
+                  </button>
+                )}
+              </div>
+            )
+          })}
+        </Card>
+
+        <Card title="Router" lead="Modelo pequeno que lê a conversa e decide quem responde. Não concede permissão nenhuma.">
+          <Field label="Modelo do router" hint="Prefira um modelo rápido: ele roda antes de cada resposta num canal.">
+            <select value={settings.routerModel} onChange={(e) => updateSettings({ routerModel: e.target.value })}>
+              {models.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {ENGINES[m.engine].label} · {m.label}
+                </option>
+              ))}
+            </select>
+          </Field>
+        </Card>
+
+        <Card title="Limites">
+          <div className="grid2">
+            <Field label="Limite padrão por agente (milhões de tokens/mês)">
+              <input
+                type="number"
+                min={0}
+                step={0.5}
+                value={settings.defaultLimit / 1_000_000}
+                onChange={(e) => updateSettings({ defaultLimit: Math.max(0, Math.round(Number(e.target.value) * 1_000_000)) })}
+              />
+            </Field>
+            <Field label="Expiração de aprovações">
+              <select defaultValue="24">
+                <option value="1">1 hora</option>
+                <option value="24">24 horas</option>
+                <option value="168">7 dias</option>
+              </select>
+            </Field>
+          </div>
+        </Card>
+      </div>
+    </Page>
+  )
+}
