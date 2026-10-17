@@ -13,7 +13,7 @@ import { Runner } from '../src/core/runs'
 const ready = { installed: true, loggedIn: true }
 
 function agent(id: string, handle: string, extra: Partial<Agent> = {}): Agent {
-  return { id, name: handle, handle, role: '', color: 'sky', instructions: '', modelId: 'sonnet', effort: 'low', limit: 1_000_000, used: 0, grants: {}, memory: 'auto', archived: false, ...extra }
+  return { id, name: handle, handle, role: '', color: 'sky', instructions: '', modelId: 'sonnet', effort: 'low', limit: 1_000_000, used: 0, grants: {}, memory: 'auto', computer: false, archived: false, ...extra }
 }
 
 // Wraps an engine to count how many turns were actually started.

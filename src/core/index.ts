@@ -18,6 +18,7 @@ import type { Engine } from './engines/types'
 import { ConnectorManager } from './connectors'
 import { Gateway } from './gateway'
 import { mainCipher, plainCipher, Secrets } from './secrets'
+import { Computers, type Shooter } from './computer'
 import { Memories } from './memory'
 import { Runner } from './runs'
 import { seed } from './seed'
@@ -70,8 +71,26 @@ function emit(event: CoreEvent): void {
   for (const p of ports) p.postMessage(wire)
 }
 
-// Asks the main process to do what only it can: open the browser, show a notification.
-const toMain = (msg: { type: 'open'; url: string } | { type: 'notify'; title: string; body: string }): void => process.parentPort.postMessage(msg)
+// Asks the main process to do what only it can: open the browser or a folder, show a notification.
+const toMain = (msg: { type: 'open'; url: string } | { type: 'open_path'; path: string } | { type: 'notify'; title: string; body: string }): void =>
+  process.parentPort.postMessage(msg)
+
+// Screenshots use Electron's Chromium, which lives in the main process.
+const shots = new Map<string, { resolve: (b: Buffer) => void; reject: (e: Error) => void }>()
+process.parentPort.on('message', (e) => {
+  const r = e.data as { type?: string; id: string; data?: string; error?: string } | undefined
+  if (r?.type !== 'screenshot-result') return
+  const p = shots.get(r.id)
+  shots.delete(r.id)
+  if (r.error !== undefined) p?.reject(new Error(r.error))
+  else p?.resolve(Buffer.from(r.data ?? '', 'base64'))
+})
+const shoot: Shooter = (opts) =>
+  new Promise((resolve, reject) => {
+    const id = randomUUID()
+    shots.set(id, { resolve, reject })
+    process.parentPort.postMessage({ type: 'screenshot', id, ...opts })
+  })
 
 const secrets = new Secrets(db, fake ? plainCipher : mainCipher(process.parentPort))
 const connectors = new ConnectorManager({
@@ -90,6 +109,8 @@ gateway.route('/oauth/callback', async (url) => {
 
 const memory = new Memories({ db, engines: engineImpls, settings: () => ready.then(settings), emit, workDir: join(dataDir, 'agents') })
 
+const computers = new Computers({ db, dataDir, emit, shoot })
+
 const runner = new Runner({
   db,
   engines: engineImpls,
@@ -99,11 +120,13 @@ const runner = new Runner({
   gateway,
   connectors,
   memory,
+  computers,
   notify: (title, body) => toMain({ type: 'notify', title, body })
 })
 
 void ready.then(async () => {
   connectors.connectAll()
+  for (const a of db.agents()) if (a.computer && !a.archived) void computers.refresh(a)
   await runner.expireApprovals()
   setInterval(() => void runner.expireApprovals(), 60_000).unref()
 })
@@ -123,6 +146,8 @@ const api: Api = {
     connectors: connectors.list(),
     approvals: db.approvals(),
     memories: db.memories(),
+    artifacts: db.artifacts(),
+    computers: db.agents().map((a) => computers.info(a)),
     demoServer: existsSync(demoPath) ? { command: 'node', args: [demoPath] } : undefined
   }),
 
@@ -136,7 +161,11 @@ const api: Api = {
 
   saveAgent: ({ agent, channelIds }) => {
     const clean: Agent = { ...agent, name: agent.name.trim(), handle: agent.handle.trim().toLowerCase() }
+    const before = db.agent(clean.id)
     db.saveAgent(clean)
+    // Turning the computer on starts it right away (the first time downloads the system); off stops it.
+    if (clean.computer && !before?.computer) void computers.ensure(clean.id).catch(() => {})
+    else if (!clean.computer && before?.computer) void computers.stop(clean.id).then(() => computers.refresh(clean))
     const changed = db.setAgentChannels(clean.id, channelIds)
     emit({ type: 'agent', agent: db.agent(clean.id)! })
     emitConversations(changed)
@@ -180,6 +209,19 @@ const api: Api = {
   purgeMemory: ({ id }) => memory.purge(id),
   editSummary: ({ conversationId, text }) => memory.editSummary(conversationId, text),
   summarizeNow: ({ conversationId }) => void memory.consolidate(conversationId, true),
+
+  computerAction: ({ agentId, action }) => {
+    const agent = db.agent(agentId)
+    if (!agent) return
+    if (action === 'open_folder') {
+      mkdirSync(computers.folder(agentId), { recursive: true })
+      return toMain({ type: 'open_path', path: computers.folder(agentId) })
+    }
+    const run = { start: () => computers.ensure(agentId), restart: () => computers.restart(agentId), erase: () => computers.erase(agentId), refresh: () => computers.refresh(agent) }[action]
+    void run().catch((e: unknown) => console.error('[computer]', e))
+  },
+  stopService: ({ agentId, name }) => void computers.stopService(agentId, name),
+  openExternal: ({ url }) => toMain({ type: 'open', url }),
 
   refreshEngines: () => {
     void detect()

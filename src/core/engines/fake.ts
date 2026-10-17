@@ -29,6 +29,19 @@ export function fakeEngine(id: Engine['id'], opts: { delayMs?: number; reply?: (
         const id = Number(/apag\w* a tarefa (\d+)/i.exec(last)![1])
         await callTool(turn.mcpUrl, await toolNamed(turn.mcpUrl, 'delete_task'), { id, _motivo: 'Você pediu pra apagar.' })
         reply = `Pedi sua aprovação pra apagar a tarefa #${id}.`
+      } else if (turn.mcpUrl && /rode `([^`]+)`/i.test(last)) {
+        const r = await callTool(turn.mcpUrl, 'bash', { command: /rode `([^`]+)`/i.exec(last)![1]! })
+        reply = `Saída:\n\n${textOf(r)}`
+      } else if (turn.mcpUrl && /suba `([^`]+)` na porta (\d+)/i.test(last)) {
+        const [, command, port] = /suba `([^`]+)` na porta (\d+)/i.exec(last)!
+        const r = await callTool(turn.mcpUrl, 'start_service', { name: 'app', command, port: Number(port) })
+        reply = textOf(r)
+      } else if (turn.mcpUrl && /mostre `([^`]+)`/i.test(last)) {
+        const r = await callTool(turn.mcpUrl, 'show_file', { path: /mostre `([^`]+)`/i.exec(last)![1]! })
+        reply = textOf(r)
+      } else if (turn.mcpUrl && /print de (\S+)/i.test(last)) {
+        const r = await callTool(turn.mcpUrl, 'screenshot', { url: /print de (\S+)/i.exec(last)![1]! })
+        reply = textOf(r)
       } else if (turn.mcpUrl && /lembr[ae] que (.+)/i.test(last)) {
         const texto = /lembr[ae] que (.+)/i.exec(last)![1]!.trim()
         await callTool(turn.mcpUrl, 'lembrar', { texto, sobre: 'usuario' })

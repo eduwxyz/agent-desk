@@ -26,6 +26,7 @@ import {
   type Step
 } from '../store'
 import { AgentAvatar, Icon, MeAvatar, duration, time, tokens, usd } from './ui'
+import { ArtifactCard, ServiceCard, SidePanel } from './Panel'
 
 export function ConversationView({ id }: { id: string }): ReactNode {
   const conv = useStore((s) => s.conversations.find((c) => c.id === id))
@@ -38,41 +39,44 @@ export function ConversationView({ id }: { id: string }): ReactNode {
   const dmAgent = conv.kind === 'dm' ? members[0] : undefined
 
   return (
-    <section className="conversation">
-      <header className="topbar">
-        <div className="topbar__title">
-          {dmAgent ? <AgentAvatar agent={dmAgent} size={22} /> : <Icon name="hash" />}
-          <h1>{title}</h1>
-          {dmAgent && <span className="tag">{dmAgent.role}</span>}
-          {conv.topic && <span className="topbar__topic">{conv.topic}</span>}
-        </div>
-        <div className="topbar__actions">
-          {conv.kind === 'channel' && (
-            <div className="stack" title="Agentes no canal">
-              {members.map((a) => (
-                <button key={a.id} className="stack__item" onClick={() => navigate({ kind: 'agent', id: a.id })} title={a.name}>
-                  <AgentAvatar agent={a} size={24} />
-                </button>
-              ))}
-              <span className="stack__count">{members.length} agente{members.length === 1 ? '' : 's'}</span>
-            </div>
-          )}
-          <button className={`btn btn--ghost ${showSummary ? 'is-active' : ''}`} title="O que esta conversa já cobriu" onClick={() => setShowSummary(!showSummary)}>
-            <Icon name="book" size={14} /> Resumo
-          </button>
-          {dmAgent && (
-            <button className="btn btn--ghost" onClick={() => navigate({ kind: 'agent', id: dmAgent.id })}>
-              Ver perfil
+    <div className="split">
+      <section className="conversation">
+        <header className="topbar">
+          <div className="topbar__title">
+            {dmAgent ? <AgentAvatar agent={dmAgent} size={22} /> : <Icon name="hash" />}
+            <h1>{title}</h1>
+            {dmAgent && <span className="tag">{dmAgent.role}</span>}
+            {conv.topic && <span className="topbar__topic">{conv.topic}</span>}
+          </div>
+          <div className="topbar__actions">
+            {conv.kind === 'channel' && (
+              <div className="stack" title="Agentes no canal">
+                {members.map((a) => (
+                  <button key={a.id} className="stack__item" onClick={() => navigate({ kind: 'agent', id: a.id })} title={a.name}>
+                    <AgentAvatar agent={a} size={24} />
+                  </button>
+                ))}
+                <span className="stack__count">{members.length} agente{members.length === 1 ? '' : 's'}</span>
+              </div>
+            )}
+            <button className={`btn btn--ghost ${showSummary ? 'is-active' : ''}`} title="O que esta conversa já cobriu" onClick={() => setShowSummary(!showSummary)}>
+              <Icon name="book" size={14} /> Resumo
             </button>
-          )}
-        </div>
-      </header>
+            {dmAgent && (
+              <button className="btn btn--ghost" onClick={() => navigate({ kind: 'agent', id: dmAgent.id })}>
+                Ver perfil
+              </button>
+            )}
+          </div>
+        </header>
 
-      {showSummary && <SummaryPanel conv={conv} messages={messages} onClose={() => setShowSummary(false)} />}
+        {showSummary && <SummaryPanel conv={conv} messages={messages} onClose={() => setShowSummary(false)} />}
 
-      <MessageList messages={messages} conversationId={id} />
-      <Composer conversationId={id} members={members} placeholder={dmAgent ? `Mensagem para ${dmAgent.name}` : `Mensagem em #${title}`} />
-    </section>
+        <MessageList messages={messages} conversationId={id} />
+        <Composer conversationId={id} members={members} placeholder={dmAgent ? `Mensagem para ${dmAgent.name}` : `Mensagem em #${title}`} />
+      </section>
+      <SidePanel />
+    </div>
   )
 }
 
@@ -175,6 +179,14 @@ function MessageRow({ message, grouped }: { message: Message; grouped: boolean }
         {message.run?.question && <QuestionCard question={message.run.question} answered={message.run.status !== 'waiting_input'} />}
         {approval && <ApprovalCard approval={approval} />}
         {message.run?.memoryIds?.map((mid) => <MemoryChip key={mid} id={mid} />)}
+        {message.run?.artifactIds && (
+          <div className="artifacts">
+            {message.run.artifactIds.map((aid) => (
+              <ArtifactCard key={aid} id={aid} />
+            ))}
+          </div>
+        )}
+        {agent && message.run?.services?.map((name) => <ServiceCard key={name} agentId={agent.id} name={name} />)}
         {message.run?.status === 'stopped' && <div className="note">Interrompido por você.</div>}
         {message.run?.status === 'interrupted' && <div className="note">Interrompido: o app fechou no meio da resposta.</div>}
         {message.run?.error && <div className="note note--error">{message.run.error}</div>}

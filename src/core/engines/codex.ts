@@ -39,7 +39,8 @@ export function codexArgs(turn: Pick<Turn, 'model' | 'effort' | 'system' | 'cwd'
   const gateway = turn.mcpUrl
     ? [
         '-c', `mcp_servers.${GATEWAY_NAME}.url=${JSON.stringify(turn.mcpUrl)}`,
-        '-c', `mcp_servers.${GATEWAY_NAME}.default_tools_approval_mode="approve"`
+        '-c', `mcp_servers.${GATEWAY_NAME}.default_tools_approval_mode="approve"`,
+        '-c', `mcp_servers.${GATEWAY_NAME}.tool_timeout_sec=900` // computer commands and installs take a while
       ]
     : []
   return [

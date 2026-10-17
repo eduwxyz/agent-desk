@@ -6,6 +6,8 @@ import {
   MODELS,
   type Agent,
   type Approval,
+  type Artifact,
+  type ComputerInfo,
   type Connector,
   type ConnectorInput,
   type ConnectorTool,
@@ -43,8 +45,13 @@ export interface State {
   messages: Message[]
   approvals: Approval[]
   memories: Memory[]
+  artifacts: Artifact[]
+  computers: ComputerInfo[]
+  panel: Panel | null // the side panel next to a conversation
   demoServer?: { command: string; args: string[] }
 }
+
+export type Panel = { kind: 'artifact'; id: string } | { kind: 'service'; agentId: string; name: string }
 
 const initials = (name: string): string =>
   name
@@ -75,7 +82,10 @@ let state: State = {
   conversations: [],
   messages: [],
   approvals: [],
-  memories: []
+  memories: [],
+  artifacts: [],
+  computers: [],
+  panel: null
 }
 
 // ---------- store plumbing ----------
@@ -161,6 +171,12 @@ function apply(e: CoreEvent): void {
         return { ...s, memories: upsert(s.memories, e.memory) }
       case 'memory_removed':
         return { ...s, memories: s.memories.filter((m) => m.id !== e.id) }
+      case 'artifact':
+        return { ...s, artifacts: upsert(s.artifacts, e.artifact) }
+      case 'computer': {
+        const others = s.computers.filter((c) => c.agentId !== e.computer.agentId)
+        return { ...s, computers: [...others, e.computer] }
+      }
     }
   })
 }
@@ -181,6 +197,8 @@ export async function start(): Promise<void> {
       connectors: snap.connectors,
       approvals: snap.approvals,
       memories: snap.memories,
+      artifacts: snap.artifacts,
+      computers: snap.computers,
       demoServer: snap.demoServer
     }
   })
@@ -191,6 +209,7 @@ export async function start(): Promise<void> {
 export const agentById = (s: State, id: string): Agent | undefined => s.agents.find((a) => a.id === id)
 export const modelById = (s: State, id: string): Model | undefined => s.models.find((m) => m.id === id)
 export const pendingApprovals = (s: State): Approval[] => s.approvals.filter((a) => a.state === 'pending')
+export const computerOf = (s: State, agentId: string): ComputerInfo | undefined => s.computers.find((c) => c.agentId === agentId)
 export const pendingMemories = (s: State): Memory[] => s.memories.filter((m) => m.state === 'pending')
 
 export function conversationTitle(s: State, c: Conversation): string {
@@ -204,6 +223,7 @@ export const navigate = (view: View): void =>
   set((s) => ({
     ...s,
     view,
+    panel: s.view?.kind === view.kind && JSON.stringify(s.view) === JSON.stringify(view) ? s.panel : null,
     conversations:
       view.kind === 'conversation' ? s.conversations.map((c) => (c.id === view.id ? { ...c, unread: 0 } : c)) : s.conversations
   }))
@@ -234,6 +254,7 @@ export function newAgentDraft(): Agent {
     used: 0,
     grants: {},
     memory: 'auto',
+    computer: false,
     archived: false
   }
 }
@@ -287,3 +308,9 @@ export function patchAgent(agentId: string, patch: Partial<Agent>): void {
   const channelIds = state.conversations.filter((c) => c.kind === 'channel' && c.members.includes(agentId)).map((c) => c.id)
   void saveAgent({ ...agent, ...patch }, channelIds)
 }
+
+export const openPanel = (panel: Panel | null): void => set((s) => ({ ...s, panel }))
+export const computerAction = (agentId: string, action: 'start' | 'restart' | 'erase' | 'open_folder' | 'refresh'): void =>
+  void call('computerAction', { agentId, action })
+export const stopService = (agentId: string, name: string): void => void call('stopService', { agentId, name })
+export const openExternal = (url: string): void => void call('openExternal', { url })

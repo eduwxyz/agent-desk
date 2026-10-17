@@ -12,8 +12,9 @@ export function systemPrompt(opts: {
   peers: Agent[]
   memories?: { aboutMe: Memory[]; own: Memory[] }
   canRemember?: boolean
+  hasComputer?: boolean
 }): string {
-  const { agent, settings, conversation, peers, memories, canRemember } = opts
+  const { agent, settings, conversation, peers, memories, canRemember, hasComputer } = opts
   const me = settings.workspaceName || 'o usuário'
   const where =
     conversation.kind === 'dm'
@@ -25,6 +26,11 @@ export function systemPrompt(opts: {
     agent.role && `Seu papel: ${agent.role}.`,
     settings.context.trim() && `## Sobre ${me}\n${settings.context.trim()}`,
     agent.instructions.trim() && `## Suas instruções\n${agent.instructions.trim()}`,
+    hasComputer &&
+      [
+        '## Seu computador',
+        `Você tem um computador Linux só seu (Debian, você é root, com internet), que continua existindo entre conversas. A pasta de trabalho é /work. Use as ferramentas bash, read_file, write_file e edit_file pra instalar, criar, rodar e testar o que precisar: nada lá dentro pede permissão, então faça em vez de descrever. Pra servidor web, API ou dashboard, use start_service e confira com screenshot. Pra mostrar o resultado a ${me}, use show_file (documento, imagem, planilha) ou screenshot. Esse computador não é o de ${me}: os arquivos de ${me} não estão nele.`
+      ].join('\n'),
     memories && (memories.aboutMe.length > 0 || memories.own.length > 0) && memorySection(me, memories),
     [
       '## Como responder',
@@ -37,7 +43,9 @@ export function systemPrompt(opts: {
       canRemember &&
         `- Quando aprender algo que vai continuar valendo em outras conversas (uma preferência de ${me}, um jeito de trabalhar, um fato durável do projeto), guarde com a ferramenta lembrar, uma ideia por vez. Se algo lembrado mudou, use substitui com o id. Não guarde o que só importa nesta conversa.`,
       `- Suas outras ferramentas são as que ${me} liberou pra você. Ações sensíveis não rodam na hora: viram um pedido de aprovação, e você recebe o resultado depois da decisão.`,
-      '- Não tem shell nem acesso a arquivos. Não diga que fez algo que nenhuma ferramenta sua fez; se faltar uma ferramenta, diga o que faria e peça o que falta.'
+      hasComputer
+        ? '- Não diga que fez algo que nenhuma ferramenta sua fez.'
+        : '- Não tem shell nem acesso a arquivos. Não diga que fez algo que nenhuma ferramenta sua fez; se faltar uma ferramenta, diga o que faria e peça o que falta.'
     ]
       .filter(Boolean)
       .join('\n')

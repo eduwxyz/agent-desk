@@ -14,7 +14,7 @@ import { Runner } from '../src/core/runs'
 const ready = { installed: true, loggedIn: true }
 const agent = (id: string, handle: string, extra: Partial<Agent> = {}): Agent => ({
   id, name: handle[0]!.toUpperCase() + handle.slice(1), handle, role: '', color: 'sky', instructions: '', modelId: 'sonnet', effort: 'low',
-  limit: 1_000_000, used: 0, grants: {}, memory: 'auto', archived: false, ...extra
+  limit: 1_000_000, used: 0, grants: {}, memory: 'auto', computer: false, archived: false, ...extra
 })
 
 let db: Db

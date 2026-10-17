@@ -103,7 +103,7 @@ export function claudeEngine(bin: () => string | undefined): Engine {
         yield { type: 'error', message: 'O Claude Code não está instalado. Veja em Configurações.' }
         return
       }
-      yield* runCli({ bin: path, args: claudeArgs(turn), stdin: turn.prompt, cwd: turn.cwd, signal: turn.signal, parser: claudeParser() })
+      yield* runCli({ bin: path, args: claudeArgs(turn), stdin: turn.prompt, cwd: turn.cwd, signal: turn.signal, parser: claudeParser(), env: { ...process.env, MCP_TOOL_TIMEOUT: '900000' } })
     }
   }
 }

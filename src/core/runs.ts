@@ -6,6 +6,7 @@ import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
 import { ENGINES, modelInfo, type Agent, type Approval, type Connector, type ConnectorTool, type Conversation, type EngineId, type Message, type Receipt, type Run, type RunStatus, type Settings, type Step } from '../shared/types'
 import { HISTORY_LIMIT, mentioned, systemPrompt, transcript } from './context'
 import { LEMBRAR, type Memories } from './memory'
+import { COMPUTER_TOOL_NAMES, COMPUTER_TOOLS, stepFor, type Computers } from './computer'
 import type { Db } from './db'
 import type { Engine } from './engines/types'
 import { textResult, type Gateway, type ToolDef } from './gateway'
@@ -39,6 +40,7 @@ export interface RunnerDeps {
   gateway?: Gateway // without it, agents get no tools at all
   connectors?: Connectors
   memory?: Memories // without it, agents get no memory and see the last HISTORY_LIMIT messages
+  computers?: Pick<Computers, 'call'> // without it, no agent has a computer
   notify?: (title: string, body: string) => void
 }
 
@@ -66,7 +68,12 @@ export function resultText(r: CallToolResult): string {
   return text.length > MAX_RESULT_CHARS ? `${text.slice(0, MAX_RESULT_CHARS)}\n[… resultado cortado em ${MAX_RESULT_CHARS} caracteres]` : text
 }
 
-const clip = (r: CallToolResult): CallToolResult => ({ ...r, content: [{ type: 'text', text: resultText(r) }] })
+// Text is clipped; images go through (screenshots, charts), a few at most.
+const clip = (r: CallToolResult): CallToolResult => {
+  const images = r.content.filter((c) => c.type === 'image').slice(0, 3)
+  const rest = images.length ? { ...r, content: r.content.filter((c) => c.type !== 'image') } : r
+  return { ...r, content: [...images, { type: 'text', text: resultText(rest) }] }
+}
 
 type Control = { ctl: AbortController; reason?: 'stopped' | 'limit' }
 
@@ -273,6 +280,7 @@ export class Runner {
         .slice(-HISTORY_LIMIT)
     }
     const canRemember = !!memory && !!this.deps.gateway && agent.memory !== 'read'
+    const computers = this.deps.gateway && agent.computer ? this.deps.computers : undefined
 
     const control: Control = { ctl: new AbortController() }
     this.controllers.set(msg.id, control)
@@ -292,8 +300,10 @@ export class Runner {
     let question: string | undefined
     let approval: Approval | undefined
     const memoryIds: string[] = []
+    const artifactIds: string[] = []
+    const services: string[] = []
     const exposed = new Map<string, Exposed>()
-    const taken = new Set<string>([ASK_USER.name, LEMBRAR.name])
+    const taken = new Set<string>([ASK_USER.name, LEMBRAR.name, ...COMPUTER_TOOL_NAMES])
     for (const c of this.deps.connectors?.list() ?? []) {
       if (c.status !== 'connected') continue
       for (const t of db.tools(c.id)) if (allowed(t, agent.grants[c.id])) exposed.set(exposedName(c, t.name, taken), { connector: c, tool: t })
@@ -301,6 +311,7 @@ export class Runner {
     const toolDefs: ToolDef[] = [
       ASK_USER,
       ...(canRemember ? [LEMBRAR] : []),
+      ...(computers ? COMPUTER_TOOLS : []),
       ...[...exposed].map(([name, { connector, tool }]): ToolDef => {
         const schema = tool.inputSchema as ToolDef['inputSchema']
         if (tool.cls !== 'sensitive') return { name, description: `[${connector.name}] ${tool.description}`, inputSchema: schema }
@@ -344,6 +355,29 @@ export class Runner {
           msg.run = { ...msg.run!, memoryIds: [...memoryIds] }
           addSteps({ id: randomUUID(), label: r.label!, detail: r.memory.text, status: 'done' })
           return textResult(r.reply)
+        }
+
+        if (computers && COMPUTER_TOOL_NAMES.has(name)) {
+          const current = db.agent(agent.id)
+          if (!current?.computer) return textResult('Seu computador foi desligado.', true)
+          const t0 = Date.now()
+          const { label, detail } = stepFor(name, args)
+          const step: Step = { id: randomUUID(), label, detail, status: 'running' }
+          flush()
+          msg.run = { ...msg.run!, steps: [...closeThinking('done', 'Pensou'), step] }
+          save()
+          const out = await computers.call(current, name, args, { conversationId: conv.id, messageId: msg.id, signal: control.ctl.signal })
+          if (out.artifact) artifactIds.push(out.artifact.id)
+          if (out.service && !services.includes(out.service)) services.push(out.service)
+          msg.run = {
+            ...msg.run!,
+            artifactIds: artifactIds.length ? [...artifactIds] : undefined,
+            services: services.length ? [...services] : undefined,
+            steps: [...msg.run!.steps.map((s) => (s.id === step.id ? { ...s, status: out.result.isError ? ('error' as const) : ('done' as const), ms: Date.now() - t0 } : s)), thinking()]
+          }
+          stepStarted = Date.now()
+          save()
+          return clip(out.result)
         }
 
         const hit = exposed.get(name)
@@ -411,7 +445,7 @@ export class Runner {
       const events = engines[engineId].run({
         model: agent.modelId,
         effort: agent.effort,
-        system: systemPrompt({ agent, settings, conversation: conv, peers, memories: memory?.forPrompt(agent), canRemember }),
+        system: systemPrompt({ agent, settings, conversation: conv, peers, memories: memory?.forPrompt(agent), canRemember, hasComputer: !!computers }),
         prompt: transcript({ agent, conversation: conv, messages: history, agents: db.agents(), me: settings.workspaceName, task: opts.task, summary }),
         cwd,
         signal: control.ctl.signal,
@@ -450,7 +484,7 @@ export class Runner {
         : undefined
     if (receipt) db.addReceipt({ ...receipt, messageId: msg.id, agentId: agent.id, engine: engineId, at: Date.now() })
 
-    const base = { depth: opts.depth, receipt, question, approvalId: approval?.id, memoryIds: memoryIds.length ? memoryIds : undefined }
+    const base = { depth: opts.depth, receipt, question, approvalId: approval?.id, memoryIds: memoryIds.length ? memoryIds : undefined, artifactIds: artifactIds.length ? artifactIds : undefined, services: services.length ? services : undefined }
     if (control.reason === 'stopped') {
       save({ run: { ...base, status: 'stopped', steps: closeThinking('error', 'Parado') } })
     } else if (control.reason === 'limit') {

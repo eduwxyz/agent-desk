@@ -2,6 +2,8 @@
 // Uses a fresh data directory and the fake engines, so nothing touches your
 // real database or spends your subscription. Pass --real to use the real CLIs.
 import { _electron as electron } from 'playwright'
+import { execFileSync } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -140,6 +142,41 @@ if (!real) {
 await win.click('.nav-item:has-text("Memória")')
 await shot('19-memoria')
 
+// ---------- M5: the agent's computer ----------
+
+await win.click('.section:has-text("Agentes") .nav-item:has-text("Lia")')
+await win.click('[aria-label="Computador"] button:text-is("Ligado")')
+await win.waitForSelector('.computer .tag:text-is("ligado")', { timeout: 300_000 })
+await shot('20-computador')
+await win.click('text=Abrir DM')
+if (real) {
+  await send('Cria um dashboard simples de vendas por mês (dados inventados, 6 meses) numa página HTML com gráfico, sobe ele num serviço e me mostra um print.')
+  await settle()
+} else {
+  await send("rode `mkdir -p site && printf '<meta charset=utf-8><h1 style=\"font:48px sans-serif;color:#2f6bf2\">Vendas por mês</h1><p>Jan 10 · Fev 14 · Mar 9</p>' > site/index.html && ls site`")
+  await settle()
+  await send('suba `cd site && python3 -m http.server 8000 --bind 0.0.0.0` na porta 8000')
+  await settle()
+  await send('print de http://localhost:8000')
+  await settle()
+  await send('mostre `site/index.html`')
+  await settle()
+}
+await shot('21-computador-chat')
+await win.click('.artifact-image')
+await win.waitForTimeout(500)
+await shot('22-painel-print')
+const open = win.locator('.artifact-card--service button:has-text("Abrir")')
+if (await open.count()) {
+  await open.first().click()
+  await win.waitForTimeout(1500)
+  await shot('23-painel-servico')
+}
+
 console.log(errors.length ? `ERRORS:\n${errors.join('\n')}` : 'no console errors')
 console.log(`data: ${data}`)
 await app.close()
+// Computers made by this run go with it.
+const prefix = `agentdesk-${createHash('sha1').update(data).digest('hex').slice(0, 6)}-`
+const ids = execFileSync('docker', ['ps', '-aq', '--filter', `name=${prefix}`], { encoding: 'utf8' }).trim().split('\n').filter(Boolean)
+if (ids.length) execFileSync('docker', ['rm', '-f', ...ids], { stdio: 'ignore' })

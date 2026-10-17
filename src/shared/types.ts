@@ -36,6 +36,7 @@ export interface Agent {
   used: number // tokens used this month, computed from receipts
   grants: Record<string, GrantLevel>
   memory: MemoryMode
+  computer: boolean // has its own Linux computer (spec §13)
   archived: boolean
 }
 
@@ -80,6 +81,8 @@ export interface Run {
   depth?: number // 1 when a human message triggered it, +1 for each agent-to-agent hop
   question?: string // asked with ask_user; answered by the next human message here
   memoryIds?: string[] // memories saved or proposed with `lembrar` in this reply
+  artifactIds?: string[] // files and screenshots shown in this reply
+  services?: string[] // services started in this reply, by name, on the author's computer
 }
 
 export type Author = { kind: 'me' } | { kind: 'agent'; id: string } | { kind: 'system' }
@@ -210,3 +213,41 @@ export const SUMMARY_WINDOW = 30 // messages kept verbatim after a consolidation
 export const SUMMARY_MAX_AFTER = 50 // more than this after the summary triggers one
 export const STALE_DAYS = 60
 export const isStale = (m: Memory, now = Date.now()): boolean => m.state === 'active' && now - m.confirmedAt > STALE_DAYS * 86_400_000
+
+// ---------- the agent's computer ----------
+
+export type ComputerState = 'off' | 'starting' | 'running' | 'stopped' | 'no_docker' | 'error'
+
+export interface Service {
+  name: string
+  command: string
+  port: number // inside the computer
+  url?: string // on the Mac (127.0.0.1), while the computer runs
+  running: boolean
+  startedAt: number
+}
+
+export interface ComputerInfo {
+  agentId: string
+  state: ComputerState
+  detail?: string // what is happening, or what went wrong
+  folder: string // /work, on the Mac
+  services: Service[]
+}
+
+export type ArtifactKind = 'image' | 'markdown' | 'html' | 'pdf' | 'csv' | 'text' | 'file'
+
+export interface Artifact {
+  id: string
+  agentId: string
+  conversationId: string
+  messageId: string
+  kind: ArtifactKind
+  name: string // file name, also its path in the app's artifact store
+  title: string
+  source: string // where it came from: a path in the computer, or a URL for screenshots
+  size: number
+  createdAt: number
+}
+
+export const artifactUrl = (a: Pick<Artifact, 'id' | 'name'>): string => `agentdesk://artifact/${a.id}/${encodeURIComponent(a.name)}`

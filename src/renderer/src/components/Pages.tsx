@@ -9,6 +9,10 @@ import {
   saveAgent,
   setGrant,
   patchAgent,
+  computerAction,
+  computerOf,
+  openExternal,
+  stopService,
   addConnector,
   authorizeConnector,
   reconnectConnector,
@@ -255,6 +259,8 @@ export function AgentPage({ id }: { id?: string }): ReactNode {
             </p>
           </Card>
 
+          {!isNew && <ComputerCard agentId={draft.id} on={draft.computer} onToggle={(on) => (setDraft((d) => ({ ...d, computer: on })), patchAgent(draft.id, { computer: on }))} />}
+
           <Card
             title="Memória"
             lead={`Memórias sobre você valem pra todos os agentes; as notas de trabalho são só dele.${isNew ? '' : ' Muda na hora, sem precisar salvar.'}`}
@@ -378,6 +384,97 @@ export function AgentPage({ id }: { id?: string }): ReactNode {
         </aside>
       </div>
     </Page>
+  )
+}
+
+const COMPUTER_STATE: Record<string, { label: string; tone: string }> = {
+  off: { label: 'desligado', tone: '' },
+  stopped: { label: 'parado', tone: 'tag--warn' },
+  starting: { label: 'ligando', tone: 'tag--warn' },
+  running: { label: 'ligado', tone: 'tag--ok' },
+  no_docker: { label: 'sem Docker', tone: 'tag--danger' },
+  error: { label: 'com problema', tone: 'tag--danger' }
+}
+
+function ComputerCard({ agentId, on, onToggle }: { agentId: string; on: boolean; onToggle: (on: boolean) => void }): ReactNode {
+  const info = useStore((s) => computerOf(s, agentId))
+  const [confirmErase, setConfirmErase] = useState(false)
+  useEffect(() => computerAction(agentId, 'refresh'), [agentId])
+  const state = on ? (info && info.state !== 'off' ? info.state : 'stopped') : 'off'
+  const st = COMPUTER_STATE[state]!
+
+  return (
+    <Card title="Computador" lead="Um Linux só dele, isolado do seu Mac, onde instala, cria, roda e testa qualquer coisa sem pedir. O que sai de lá (push, e-mail, deploy) continua passando pelos conectores.">
+      <div className="segmented segmented--wide" role="radiogroup" aria-label="Computador">
+        {[false, true].map((v) => (
+          <button key={String(v)} role="radio" aria-checked={on === v} className={on === v ? 'is-active' : ''} onClick={() => on !== v && onToggle(v)}>
+            {v ? 'Ligado' : 'Desligado'}
+          </button>
+        ))}
+      </div>
+      {on && (
+        <>
+          <div className="computer">
+            <span className={`tag ${st.tone}`}>{st.label}</span>
+            <span className="muted small grow">{info?.detail ?? (state === 'running' ? 'Pronto. Pasta de trabalho: /work' : state === 'stopped' ? 'Liga sozinho quando ele precisar.' : '')}</span>
+            {state === 'stopped' && (
+              <button className="btn btn--sm" onClick={() => computerAction(agentId, 'start')}>
+                Ligar agora
+              </button>
+            )}
+            {state === 'no_docker' && (
+              <button className="btn btn--sm" onClick={() => computerAction(agentId, 'refresh')}>
+                Verificar de novo
+              </button>
+            )}
+          </div>
+          {info && info.services.length > 0 && (
+            <div className="table computer__services">
+              {info.services.map((svc) => (
+                <div key={svc.name} className="table__row">
+                  <Icon name="globe" size={14} />
+                  <span className="grow">
+                    <strong>{svc.name}</strong> <span className="muted small">porta {svc.port} · {svc.running ? 'no ar' : 'parado'}</span>
+                  </span>
+                  {svc.running && svc.url && (
+                    <>
+                      <button className="btn btn--sm btn--ghost" onClick={() => openExternal(svc.url!)}>
+                        Abrir
+                      </button>
+                      <button className="btn btn--sm btn--ghost" onClick={() => stopService(agentId, svc.name)}>
+                        Parar
+                      </button>
+                    </>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+          <div className="row computer__actions">
+            <button className="btn btn--sm btn--ghost" onClick={() => computerAction(agentId, 'open_folder')}>
+              Abrir pasta
+            </button>
+            <button className="btn btn--sm btn--ghost" disabled={state !== 'running'} onClick={() => computerAction(agentId, 'restart')}>
+              Reiniciar
+            </button>
+            {confirmErase ? (
+              <>
+                <button className="btn btn--sm btn--danger" onClick={() => (computerAction(agentId, 'erase'), setConfirmErase(false))}>
+                  Apagar tudo, inclusive /work
+                </button>
+                <button className="btn btn--sm btn--ghost" onClick={() => setConfirmErase(false)}>
+                  Cancelar
+                </button>
+              </>
+            ) : (
+              <button className="btn btn--sm btn--ghost" onClick={() => setConfirmErase(true)}>
+                Apagar computador
+              </button>
+            )}
+          </div>
+        </>
+      )}
+    </Card>
   )
 }
 

@@ -27,6 +27,8 @@ Usuário do MVP: eu, numa máquina só. Quem baixar o repositório usa do mesmo 
 | **Aprovação** | Pedido para executar uma chamada `sensitive` específica (ferramenta + argumentos exatos). |
 | **Resumo** | O que uma conversa já cobriu e saiu da janela de mensagens: decisões, pendências, estado do trabalho. Um por canal ou DM. |
 | **Memória** | Uma nota durável, curta, com origem. **Sobre mim** (vale pra todos os agentes) ou **do agente** (só dele). |
+| **Computador** | Um computador Linux isolado (container Docker) de um agente, persistente, onde ele faz qualquer coisa sem pedir. |
+| **Artefato** | Um arquivo que o agente mostra no chat (print, documento, página, planilha), guardado como estava na hora. |
 | **Recibo** | Registro de cada turno: motor, modelo, tokens (in/out/cache/raciocínio), duração e, quando a CLI informa, o custo equivalente em API. |
 
 ## Behaviors
@@ -170,6 +172,27 @@ Referências: o modelo do **Honcho** (participantes e conversas, resumos por ses
 
 **Tela de Memória** (sidebar): Sugestões (com badge), Revisar, Sobre mim, uma seção por agente, Esquecidas. Cada item mostra texto, origem, data e ações (editar, esquecer, histórico).
 
+### 13. Computador do agente (M5)
+
+Cada agente pode ganhar um computador próprio: um Linux isolado dentro do Mac, onde ele instala, cria, roda e testa o que precisar sem pedir permissão. O Mac do usuário fica de fora.
+
+- **O que é:** um container Docker por agente, criado pelo app e persistente (o que ele instala e cria continua lá). Imagem base `node:22-bookworm` (Node, npm, Python 3, git, curl, compiladores); o agente é root lá dentro e instala o resto (apt, pip, npm). Limite de 3 GB de RAM e 2 CPUs.
+- **O cérebro fica fora:** a CLI continua rodando no Mac, com a assinatura. O computador só recebe comandos pelo gateway. Nenhuma credencial entra nele.
+- **A pasta `/work`** fica numa pasta do app no Mac, então o app lê os arquivos direto e o usuário pode abrir no Finder.
+- Liga por agente, na página dele (**Computador**: desligado / ligado). Default: desligado. Precisa do Docker Desktop rodando; sem ele, o agente avisa e a página mostra o que fazer.
+- **Ferramentas** (pelo gateway, só pra agente com computador ligado):
+  - `bash`: roda um comando em `/work`, com tempo máximo (default 2 min, até 10). A saída volta cortada no meio se for longa.
+  - `read_file`, `write_file`, `edit_file`: ler, criar e trocar trechos de arquivos.
+  - `start_service` / `stop_service`: deixa um processo rodando em segundo plano (servidor web, API, dashboard), com log em `/work/.logs`. As portas do computador (3000, 3001, 4173, 5000, 5173, 8000, 8080, 8501, 8888) ficam acessíveis só em `127.0.0.1` do Mac.
+  - `screenshot`: abre uma URL num navegador escondido (o Chromium do próprio Electron) e devolve a imagem pro modelo e pro chat. `localhost:<porta>` aponta pro computador do agente.
+  - `show_file`: mostra um arquivo no chat (imagem, Markdown, HTML, PDF, CSV ou texto).
+- **Governança:** dentro do computador nada pede aprovação. O que sai dele (push, e-mail, deploy por conector) continua nas regras de conectores e aprovações. Cada comando aparece como step.
+- **Na interface:**
+  - prints e arquivos mostrados aparecem na mensagem e abrem num **painel lateral** (HTML num iframe isolado, sem acesso ao app);
+  - serviço iniciado vira um card com **Abrir**, que mostra o app rodando no painel;
+  - página do agente: estado do computador, serviços (abrir, parar), **Abrir pasta**, **Reiniciar** e **Apagar computador** (some tudo, inclusive `/work`).
+- Depois (M5.1): emprestar uma pasta do Mac pro computador do agente, pra ele trabalhar num projeto existente.
+
 ## Acceptance criteria
 
 1. **Chat básico:** crio um agente no Claude Code, abro DM, mando uma mensagem e vejo a resposta em streaming, com rodapé de modelo/tokens/duração. O mesmo funciona com um agente no Codex.
@@ -200,11 +223,13 @@ Referências: o modelo do **Honcho** (participantes e conversas, resumos por ses
 17. **Memória entre conversas (M4):** digo na DM da Lia "eu prefiro PR pequeno"; ela guarda; no #engenharia o Theo recebe essa memória no prompt.
 18. **Governança da memória (M4):** com "pede aprovação", nada entra no prompt antes de eu aceitar. Uma extração baseada só no que um agente disse não vira memória sobre mim.
 19. **Esquecer (M4):** esqueço uma memória; ela sai do prompt e a consolidação seguinte, sobre as mesmas mensagens, não a recria.
+20. **Computador (M5):** com o computador ligado, peço "cria um dashboard com esses dados e me mostra"; o agente instala o que precisa, sobe o servidor, e eu vejo o print no chat e o app rodando no painel, sem nenhum pedido de aprovação. Um agente sem computador não vê essas ferramentas.
+21. **Isolamento do computador (M5):** um comando do agente não enxerga arquivos do Mac fora de `/work`, nenhuma credencial das CLIs está no container, e as portas só respondem em `127.0.0.1`.
 
 ## Out of scope (MVP)
 
 - Chave de API / pagamento por uso (os motores podem até aceitar, mas o app não oferece nem testa).
-- Ferramentas embutidas das CLIs (shell, edição de arquivos, busca na web) e "computador do agente".
+- Ferramentas embutidas das CLIs (shell, edição de arquivos, busca na web) no Mac do usuário: quem precisa disso ganha um computador próprio (M5).
 - Missões de código com Claude Code ou Codex trabalhando num repositório (candidato natural pra v0.2: é só liberar as ferramentas embutidas num diretório escolhido, com aprovação).
 - Sessões persistentes da CLI (`--resume`) como otimização.
 - Streaming token a token no Codex (via `codex app-server`).
@@ -287,7 +312,9 @@ Referências: o modelo do **Honcho** (participantes e conversas, resumos por ses
 
 4. **M4, memória (feito):** resumo por conversa, memórias sobre mim e por agente, ferramenta `lembrar`, extração na consolidação, esquecer com registro, Revisar. (AC 16, 17, 18, 19) Testado com o Claude Code real: o Sonnet guardou sozinho uma preferência dita de passagem, na terceira pessoa; outro agente usou ela num canal; o Haiku resumiu, extraiu só o que eu disse (ignorou um palpite do agente) e não recriou uma memória esquecida ao reler as mesmas mensagens.
 
-O MVP termina quando os quatro estiverem prontos e eu usar o app por uma semana no dia a dia.
+5. **M5, computador do agente (feito):** container por agente, ferramentas `bash`, arquivos, serviços, `screenshot` e `show_file`, artefatos e painel lateral. (AC 20, 21) Testado com o Claude Code real: pedi um dashboard de vendas com gráfico, servido e com print; o Sonnet escreveu, subiu o serviço, tirou o print e respondeu em 15 s, sem nenhum pedido de aprovação. Arquivos são lidos e escritos sempre por dentro do container: um symlink em `/work` apontando pro Mac não alcança o Mac. Codex com computador ainda não testado (depende do login próprio).
+
+O MVP termina quando os cinco estiverem prontos e eu usar o app por uma semana no dia a dia.
 
 ## Riscos
 

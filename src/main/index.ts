@@ -1,5 +1,11 @@
-import { app, BrowserWindow, ipcMain, MessageChannelMain, Notification, safeStorage, shell, utilityProcess, type UtilityProcess } from 'electron'
-import { join } from 'node:path'
+import { app, BrowserWindow, ipcMain, MessageChannelMain, net, Notification, protocol, safeStorage, shell, utilityProcess, type UtilityProcess } from 'electron'
+import { join, normalize, sep } from 'node:path'
+import { pathToFileURL } from 'node:url'
+
+const dataDir = (): string => process.env['AGENT_DESK_DATA'] ?? app.getPath('userData')
+
+// agentdesk://artifact/<id>/<name> serves what agents showed in the chat.
+protocol.registerSchemesAsPrivileged([{ scheme: 'agentdesk', privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true } }])
 
 let core: UtilityProcess | null = null
 
@@ -8,7 +14,7 @@ let core: UtilityProcess | null = null
 function startCore(): UtilityProcess {
   const child = utilityProcess.fork(join(import.meta.dirname, 'core.js'), [], {
     serviceName: 'agent-desk-core',
-    env: { ...process.env, AGENT_DESK_DATA: process.env['AGENT_DESK_DATA'] ?? app.getPath('userData') }
+    env: { ...process.env, AGENT_DESK_DATA: dataDir() }
   })
   child.on('message', (msg: CoreRequest) => handleCore(child, msg))
   child.on('exit', (code) => {
@@ -21,7 +27,9 @@ function startCore(): UtilityProcess {
 type CoreRequest =
   | { type: 'secret'; id: string; op: 'encrypt' | 'decrypt'; data: string }
   | { type: 'open'; url: string }
+  | { type: 'open_path'; path: string }
   | { type: 'notify'; title: string; body: string }
+  | { type: 'screenshot'; id: string; url: string; width: number; height: number; fullPage: boolean }
 
 // Things the core can't do itself: the OS keychain, the browser, notifications.
 function handleCore(child: UtilityProcess, msg: CoreRequest): void {
@@ -36,9 +44,61 @@ function handleCore(child: UtilityProcess, msg: CoreRequest): void {
     }
   } else if (msg.type === 'open') {
     if (/^https?:\/\//.test(msg.url)) void shell.openExternal(msg.url)
+  } else if (msg.type === 'open_path') {
+    // Only folders the app keeps (an agent's computer), never an arbitrary path.
+    if (normalize(msg.path).startsWith(join(dataDir(), 'computers') + sep)) void shell.openPath(msg.path)
   } else if (msg.type === 'notify') {
     if (Notification.isSupported()) new Notification({ title: msg.title, body: msg.body }).show()
+  } else if (msg.type === 'screenshot') {
+    screenshot(msg).then(
+      (png) => child.postMessage({ type: 'screenshot-result', id: msg.id, data: png.toString('base64') }),
+      (e: unknown) => child.postMessage({ type: 'screenshot-result', id: msg.id, error: e instanceof Error ? e.message : String(e) })
+    )
   }
+}
+
+const wait = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
+
+// Loads the page in a hidden window with its own throwaway session (no cookies
+// from anything else) and captures it.
+async function screenshot(o: { url: string; width: number; height: number; fullPage: boolean }): Promise<Buffer> {
+  if (!/^https?:\/\//.test(o.url)) throw new Error('só http e https')
+  const win = new BrowserWindow({
+    show: false,
+    width: o.width,
+    height: o.height,
+    useContentSize: true,
+    webPreferences: { offscreen: true, sandbox: true, contextIsolation: true, nodeIntegration: false, partition: 'screenshots' }
+  })
+  win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+  try {
+    await Promise.race([win.loadURL(o.url), wait(30_000).then(() => Promise.reject(new Error('a página não carregou em 30 s')))])
+    await wait(1200) // fonts, charts and client-side rendering
+    if (o.fullPage) {
+      const h = Number(await win.webContents.executeJavaScript('Math.max(document.documentElement.scrollHeight, document.body ? document.body.scrollHeight : 0)'))
+      if (h > o.height) {
+        win.setContentSize(o.width, Math.min(h, 6000))
+        await wait(600)
+      }
+    }
+    return (await win.webContents.capturePage()).toPNG()
+  } finally {
+    win.destroy()
+  }
+}
+
+function serveArtifact(req: Request): Promise<Response> | Response {
+  const u = new URL(req.url)
+  const [id = '', name = ''] = u.pathname.slice(1).split('/')
+  const dir = join(dataDir(), 'artifacts', id)
+  const file = normalize(join(dir, decodeURIComponent(name)))
+  if (u.host !== 'artifact' || !/^[0-9a-f-]{36}$/.test(id) || !file.startsWith(dir + sep)) return new Response('not found', { status: 404 })
+  return net.fetch(pathToFileURL(file).toString()).then((r) => {
+    const headers = new Headers(r.headers)
+    // A page an agent made runs scripts, but in a sandbox with no access to the app.
+    headers.set('Content-Security-Policy', 'sandbox allow-scripts allow-popups')
+    return new Response(r.body, { status: r.status, headers })
+  })
 }
 
 // Each page load asks for a port; one end goes to the core, the other to the page.
@@ -64,7 +124,8 @@ function createWindow(): void {
       preload: join(import.meta.dirname, '../preload/index.cjs'),
       sandbox: true,
       contextIsolation: true,
-      nodeIntegration: false
+      nodeIntegration: false,
+      plugins: true // the PDF viewer, for PDFs agents show
     }
   })
 
@@ -84,6 +145,7 @@ function createWindow(): void {
 }
 
 app.whenReady().then(() => {
+  protocol.handle('agentdesk', serveArtifact)
   core = startCore()
   createWindow()
   app.on('activate', () => {

@@ -60,7 +60,7 @@ let seen: { turns: Turn[]; tools: string[][]; results: unknown[] }
 
 const agent = (grant: GrantLevel): Agent => ({
   id: 'a1', name: 'Lia', handle: 'lia', role: '', color: 'sky', instructions: '', modelId: 'sonnet', effort: 'low',
-  limit: 1_000_000, used: 0, grants: { [connectorId]: grant }, memory: 'auto', archived: false
+  limit: 1_000_000, used: 0, grants: { [connectorId]: grant }, memory: 'auto', computer: false, archived: false
 })
 
 function runner(plan: (turn: Turn, tools: string[]) => Plan, onDb: Db = db): Runner {

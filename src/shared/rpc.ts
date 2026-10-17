@@ -1,5 +1,5 @@
 // The contract between the renderer and the core, carried over a MessagePort.
-import type { Agent, Approval, Connector, ConnectorInput, ConnectorTool, Conversation, EngineId, Memory, MemoryScope, Message, Settings } from './types'
+import type { Agent, Approval, Artifact, ComputerInfo, Connector, ConnectorInput, ConnectorTool, Conversation, EngineId, Memory, MemoryScope, Message, Settings } from './types'
 
 export interface Snapshot {
   settings: Settings
@@ -9,6 +9,8 @@ export interface Snapshot {
   connectors: Connector[]
   approvals: Approval[]
   memories: Memory[]
+  artifacts: Artifact[]
+  computers: ComputerInfo[]
   demoServer?: { command: string; args: string[] } // the bundled demo connector, when available
 }
 
@@ -37,6 +39,9 @@ export interface Api {
   purgeMemory(p: { id: string }): void // removes even the record that it was forgotten
   editSummary(p: { conversationId: string; text: string }): void
   summarizeNow(p: { conversationId: string }): void
+  computerAction(p: { agentId: string; action: 'start' | 'restart' | 'erase' | 'open_folder' | 'refresh' }): void
+  stopService(p: { agentId: string; name: string }): void
+  openExternal(p: { url: string }): void
 }
 
 export type Method = keyof Api
@@ -54,6 +59,8 @@ export type CoreEvent =
   | { type: 'approval'; approval: Approval }
   | { type: 'memory'; memory: Memory }
   | { type: 'memory_removed'; id: string }
+  | { type: 'computer'; computer: ComputerInfo }
+  | { type: 'artifact'; artifact: Artifact }
 
 export type Request = { id: number; method: Method; params: unknown }
 export type Response = { id: number; result?: unknown; error?: string }

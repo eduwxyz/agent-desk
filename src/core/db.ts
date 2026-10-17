@@ -1,5 +1,5 @@
 import { DatabaseSync } from 'node:sqlite'
-import type { Agent, AgentColor, Approval, ApprovalState, Author, Connector, ConnectorAuth, ConnectorTool, Conversation, Effort, Memory, MemoryMode, MemoryState, Message, Receipt, Run, Settings, ToolClass } from '../shared/types'
+import type { Agent, AgentColor, Approval, ApprovalState, Artifact, ArtifactKind, Author, Connector, ConnectorAuth, ConnectorTool, Conversation, Effort, Memory, MemoryMode, MemoryState, Message, Receipt, Run, Settings, ToolClass } from '../shared/types'
 
 // Each entry runs once, in order; PRAGMA user_version records how far we got.
 const MIGRATIONS = [
@@ -123,6 +123,29 @@ const MIGRATIONS = [
     confirmed_at INTEGER NOT NULL
   );
   CREATE INDEX memories_by_scope ON memories (scope, state);
+  `,
+  `
+  ALTER TABLE agents ADD COLUMN computer INTEGER NOT NULL DEFAULT 0;
+  CREATE TABLE artifacts (
+    id TEXT PRIMARY KEY,
+    agent_id TEXT NOT NULL,
+    conversation_id TEXT NOT NULL,
+    message_id TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    name TEXT NOT NULL,
+    title TEXT NOT NULL,
+    source TEXT NOT NULL,
+    size INTEGER NOT NULL,
+    created_at INTEGER NOT NULL
+  );
+  CREATE TABLE services (
+    agent_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    command TEXT NOT NULL,
+    port INTEGER NOT NULL,
+    started_at INTEGER NOT NULL,
+    PRIMARY KEY (agent_id, name)
+  );
   `
 ]
 
@@ -203,6 +226,7 @@ export class Db {
       used: this.usedThisMonth(str(r['id'])),
       grants: JSON.parse(str(r['grants']) || '{}') as Agent['grants'],
       memory: (str(r['memory_mode']) || 'auto') as MemoryMode,
+      computer: r['computer'] === 1,
       archived: r['archived'] === 1
     }
   }
@@ -219,13 +243,14 @@ export class Db {
   saveAgent(a: Agent): void {
     this.db
       .prepare(
-        `INSERT INTO agents (id, name, handle, role, color, instructions, model, effort, limit_tokens, grants, memory_mode, archived, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `INSERT INTO agents (id, name, handle, role, color, instructions, model, effort, limit_tokens, grants, memory_mode, computer, archived, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT (id) DO UPDATE SET name = excluded.name, handle = excluded.handle, role = excluded.role,
            color = excluded.color, instructions = excluded.instructions, model = excluded.model, effort = excluded.effort,
-           limit_tokens = excluded.limit_tokens, grants = excluded.grants, memory_mode = excluded.memory_mode, archived = excluded.archived`
+           limit_tokens = excluded.limit_tokens, grants = excluded.grants, memory_mode = excluded.memory_mode,
+           computer = excluded.computer, archived = excluded.archived`
       )
-      .run(a.id, a.name, a.handle, a.role, a.color, a.instructions, a.modelId, a.effort, a.limit, JSON.stringify(a.grants), a.memory ?? 'auto', a.archived ? 1 : 0, Date.now())
+      .run(a.id, a.name, a.handle, a.role, a.color, a.instructions, a.modelId, a.effort, a.limit, JSON.stringify(a.grants), a.memory ?? 'auto', a.computer ? 1 : 0, a.archived ? 1 : 0, Date.now())
   }
 
   usedThisMonth(agentId: string): number {
@@ -563,5 +588,52 @@ export class Db {
 
   deleteMemory(id: string): void {
     this.db.prepare('DELETE FROM memories WHERE id = ?').run(id)
+  }
+
+  // ---------- artifacts ----------
+
+  artifacts(): Artifact[] {
+    return (this.db.prepare('SELECT * FROM artifacts ORDER BY created_at').all() as Row[]).map((r) => ({
+      id: str(r['id']),
+      agentId: str(r['agent_id']),
+      conversationId: str(r['conversation_id']),
+      messageId: str(r['message_id']),
+      kind: str(r['kind']) as ArtifactKind,
+      name: str(r['name']),
+      title: str(r['title']),
+      source: str(r['source']),
+      size: Number(r['size']),
+      createdAt: Number(r['created_at'])
+    }))
+  }
+
+  saveArtifact(a: Artifact): void {
+    this.db
+      .prepare('INSERT INTO artifacts (id, agent_id, conversation_id, message_id, kind, name, title, source, size, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(a.id, a.agentId, a.conversationId, a.messageId, a.kind, a.name, a.title, a.source, a.size, a.createdAt)
+  }
+
+  // ---------- services (what runs on an agent's computer) ----------
+
+  services(agentId: string): { name: string; command: string; port: number; startedAt: number }[] {
+    return (this.db.prepare('SELECT * FROM services WHERE agent_id = ? ORDER BY started_at').all(agentId) as Row[]).map((r) => ({
+      name: str(r['name']),
+      command: str(r['command']),
+      port: Number(r['port']),
+      startedAt: Number(r['started_at'])
+    }))
+  }
+
+  saveService(agentId: string, s: { name: string; command: string; port: number; startedAt: number }): void {
+    this.db
+      .prepare(
+        'INSERT INTO services (agent_id, name, command, port, started_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT (agent_id, name) DO UPDATE SET command = excluded.command, port = excluded.port, started_at = excluded.started_at'
+      )
+      .run(agentId, s.name, s.command, s.port, s.startedAt)
+  }
+
+  removeServices(agentId: string, name?: string): void {
+    if (name) this.db.prepare('DELETE FROM services WHERE agent_id = ? AND name = ?').run(agentId, name)
+    else this.db.prepare('DELETE FROM services WHERE agent_id = ?').run(agentId)
   }
 }
