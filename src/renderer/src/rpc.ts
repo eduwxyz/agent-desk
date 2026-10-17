@@ -2,7 +2,7 @@ import type { CoreEvent, Method, Params, Request, Result, Wire } from '../../sha
 
 declare global {
   interface Window {
-    agentDesk: { connect: () => void; onNavigate: (cb: (conversationId: string) => void) => void }
+    agentDesk: { connect: () => void; pickFolder: () => Promise<string | null>; onNavigate: (cb: (conversationId: string) => void) => void }
   }
 }
 

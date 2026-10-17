@@ -11,6 +11,8 @@ import {
   patchAgent,
   computerAction,
   computerOf,
+  folderAction,
+  lendFolder,
   openExternal,
   stopService,
   addConnector,
@@ -452,6 +454,7 @@ function ComputerCard({ agentId, on, onToggle }: { agentId: string; on: boolean;
               ))}
             </div>
           )}
+          <LentFolders agentId={agentId} />
           <div className="row computer__actions">
             <button className="btn btn--sm btn--ghost" onClick={() => computerAction(agentId, 'open_folder')}>
               Abrir pasta
@@ -477,6 +480,53 @@ function ComputerCard({ agentId, on, onToggle }: { agentId: string; on: boolean;
         </>
       )}
     </Card>
+  )
+}
+
+// Folders of the Mac this agent's computer sees at /projetos/<name>.
+function LentFolders({ agentId }: { agentId: string }): ReactNode {
+  const folders = useStore((s) => agentById(s, agentId)?.folders ?? [])
+  const [error, setError] = useState<string | null>(null)
+  const home = useStore((s) => s.computers.find((c) => c.agentId === agentId)?.folder.match(/^\/Users\/[^/]+/)?.[0])
+  const short = (p: string): string => (home && p.startsWith(home) ? `~${p.slice(home.length)}` : p)
+  return (
+    <div className="folders">
+      <div className="row row--between">
+        <strong className="small">Pastas do seu Mac</strong>
+        <button className="btn btn--sm" onClick={() => void lendFolder(agentId).then(setError)}>
+          Emprestar pasta…
+        </button>
+      </div>
+      {folders.length === 0 ? (
+        <p className="muted small">Empreste a pasta de um projeto pra ele trabalhar nela. Ele mexe nos arquivos de verdade, então use git pra poder desfazer.</p>
+      ) : (
+        <>
+          <div className="table">
+            {folders.map((f) => (
+              <div key={f.name} className="table__row folder">
+                <Icon name="folder" size={14} />
+                <span className="grow folder__body">
+                  <code>/projetos/{f.name}</code>
+                  <span className="muted small">{short(f.path)}</span>
+                </span>
+                <div className="segmented" role="radiogroup" aria-label={`Acesso a ${f.name}`}>
+                  {(['read_write', 'read_only'] as const).map((a) => (
+                    <button key={a} role="radio" aria-checked={f.readOnly === (a === 'read_only')} className={f.readOnly === (a === 'read_only') ? 'is-active' : ''} onClick={() => f.readOnly !== (a === 'read_only') && folderAction(agentId, f.name, a)}>
+                      {a === 'read_only' ? 'Só ler' : 'Pode mudar'}
+                    </button>
+                  ))}
+                </div>
+                <button className="btn btn--sm btn--ghost" onClick={() => folderAction(agentId, f.name, 'return')}>
+                  Devolver
+                </button>
+              </div>
+            ))}
+          </div>
+          <p className="hint">Emprestar ou devolver reinicia o computador: os serviços param, o que ele instalou fica. Sem credenciais lá dentro, push e deploy ficam com você.</p>
+        </>
+      )}
+      {error && <p className="field__error">{error}</p>}
+    </div>
   )
 }
 

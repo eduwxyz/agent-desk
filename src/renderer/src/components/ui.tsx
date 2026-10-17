@@ -40,6 +40,7 @@ const PATHS: Record<string, ReactNode> = {
     </>
   ),
   terminal: <path d="m5 7 5 5-5 5M12 17h7" />,
+  folder: <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z" />,
   globe: (
     <>
       <circle cx="12" cy="12" r="9" />

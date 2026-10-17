@@ -37,8 +37,18 @@ export interface Agent {
   grants: Record<string, GrantLevel>
   memory: MemoryMode
   computer: boolean // has its own Linux computer (spec §13)
+  folders?: LentFolder[] // Mac folders lent to that computer (spec §13, M5.1); changed only through lendFolder/folderAction
   archived: boolean
 }
+
+// A folder of the Mac mounted in an agent's computer at /projetos/<name>.
+export interface LentFolder {
+  name: string
+  path: string // absolute, on the Mac
+  readOnly: boolean
+}
+
+export const PROJECTS_DIR = '/projetos'
 
 export interface Conversation {
   id: string

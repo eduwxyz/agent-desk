@@ -334,3 +334,16 @@ export const removeRoutine = (id: string): void => void call('removeRoutine', { 
 export const runRoutine = (id: string): void => void call('runRoutine', { id })
 // The id of the DM with an agent, created if it doesn't exist yet, without opening it.
 export const dmWith = (agentId: string): Promise<string> => call('openDm', { agentId })
+
+// Opens the Mac's folder picker; resolves with why it couldn't be lent, if so.
+export async function lendFolder(agentId: string): Promise<string | null> {
+  const path = await window.agentDesk.pickFolder()
+  if (!path) return null
+  try {
+    await call('lendFolder', { agentId, path })
+    return null
+  } catch (e) {
+    return e instanceof Error ? e.message : String(e)
+  }
+}
+export const folderAction = (agentId: string, name: string, action: 'read_only' | 'read_write' | 'return'): void => void call('folderAction', { agentId, name, action })

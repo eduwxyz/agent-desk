@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, MessageChannelMain, net, Notification, protocol, safeStorage, shell, utilityProcess, type UtilityProcess } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, MessageChannelMain, net, Notification, protocol, safeStorage, shell, utilityProcess, type UtilityProcess } from 'electron'
 import { join, normalize, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
@@ -128,6 +128,14 @@ function showWindow(conversationId?: string): void {
   if (win.webContents.isLoading()) win.webContents.once('did-finish-load', go)
   else go()
 }
+
+// The Mac's folder picker, for lending a folder to an agent's computer. The core checks the choice.
+ipcMain.handle('pick-folder', async (event) => {
+  const win = BrowserWindow.fromWebContents(event.sender)
+  const opts = { title: 'Emprestar pasta', buttonLabel: 'Emprestar', properties: ['openDirectory' as const] }
+  const r = win ? await dialog.showOpenDialog(win, opts) : await dialog.showOpenDialog(opts)
+  return r.canceled ? null : (r.filePaths[0] ?? null)
+})
 
 function createWindow(): BrowserWindow {
   const win = new BrowserWindow({

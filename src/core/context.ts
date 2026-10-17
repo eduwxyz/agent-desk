@@ -1,7 +1,7 @@
 // Builds what a turn sends to the engine: a system prompt (stable per agent)
 // and a prompt with the conversation transcript. The CLI keeps no session
 // between turns, so everything the agent knows comes from here.
-import { describeSchedule, type Agent, type Conversation, type Memory, type Message, type Routine, type Settings } from '../shared/types'
+import { describeSchedule, PROJECTS_DIR, type Agent, type Conversation, type Memory, type Message, type Routine, type Settings } from '../shared/types'
 
 export const HISTORY_LIMIT = 30
 
@@ -30,8 +30,16 @@ export function systemPrompt(opts: {
     hasComputer &&
       [
         '## Seu computador',
-        `Você tem um computador Linux só seu (Debian, você é root, com internet), que continua existindo entre conversas. A pasta de trabalho é /work. Use as ferramentas bash, read_file, write_file e edit_file pra instalar, criar, rodar e testar o que precisar: nada lá dentro pede permissão, então faça em vez de descrever. Pra servidor web, API ou dashboard, use start_service e confira com screenshot. Pra mostrar o resultado a ${me}, use show_file (documento, imagem, planilha) ou screenshot. Esse computador não é o de ${me}: os arquivos de ${me} não estão nele.`
-      ].join('\n'),
+        `Você tem um computador Linux só seu (Debian, você é root, com internet), que continua existindo entre conversas. A pasta de trabalho é /work. Use as ferramentas bash, read_file, write_file e edit_file pra instalar, criar, rodar e testar o que precisar: nada lá dentro pede permissão, então faça em vez de descrever. Pra servidor web, API ou dashboard, use start_service e confira com screenshot. Pra mostrar o resultado a ${me}, use show_file (documento, imagem, planilha) ou screenshot. Esse computador não é o de ${me}: ${agent.folders?.length ? `do Mac de ${me}, você só vê as pastas abaixo` : `os arquivos de ${me} não estão nele`}.`,
+        agent.folders?.length &&
+          [
+            `Pastas do Mac de ${me} emprestadas pra você (são os arquivos de verdade, o que você muda aparece na hora no Mac):`,
+            ...agent.folders.map((f) => `- ${PROJECTS_DIR}/${f.name}${f.readOnly ? ' (só leitura)' : ''}`),
+            `Nelas, mude só o que ${me} pediu e confira com os testes ou o build do projeto. Antes de mexer, olhe o git status; não apague, não reescreva o que não entendeu e não descarte mudanças de ${me}. node_modules e .venv aqui são do Linux, separados dos do Mac: instale à vontade. Não há credenciais no seu computador, então git push e deploy não funcionam: faça commit só se ${me} pedir e diga o que falta ${me} fazer.`
+          ].join('\n')
+      ]
+        .filter(Boolean)
+        .join('\n'),
     memories && (memories.aboutMe.length > 0 || memories.own.length > 0) && memorySection(me, memories),
     routines && routines.length > 0 && `## Suas rotinas\nPedidos agendados que você roda sozinho. Pra mudar ou apagar, use agendar_rotina com substitui, ou cancelar_rotina.\n${routines.map((r) => `- [${r.id}] ${r.name}: ${describeSchedule(r.schedule).toLowerCase()} · ${r.prompt.replace(/\s+/g, ' ').slice(0, 160)}`).join('\n')}`,
     [

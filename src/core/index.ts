@@ -18,7 +18,7 @@ import type { Engine } from './engines/types'
 import { ConnectorManager } from './connectors'
 import { Gateway } from './gateway'
 import { mainCipher, plainCipher, Secrets } from './secrets'
-import { Computers, type Shooter } from './computer'
+import { checkFolder, Computers, folderName, type Shooter } from './computer'
 import { Memories } from './memory'
 import { Routines } from './routines'
 import { Runner } from './runs'
@@ -149,6 +149,12 @@ void ready.then(async () => {
 })
 toMain({ type: 'login_item', open: !!settings().openAtLogin })
 
+function setFolders(agent: Agent, folders: NonNullable<Agent['folders']>): void {
+  db.setFolders(agent.id, folders)
+  emit({ type: 'agent', agent: db.agent(agent.id)! })
+  if (agent.computer) void computers.ensure(agent.id).catch((e: unknown) => console.error('[computer]', e))
+}
+
 function emitConversations(ids?: string[]): void {
   for (const c of db.conversations()) if (!ids || ids.includes(c.id)) emit({ type: 'conversation', conversation: c })
 }
@@ -242,6 +248,23 @@ const api: Api = {
     void run().catch((e: unknown) => console.error('[computer]', e))
   },
   stopService: ({ agentId, name }) => void computers.stopService(agentId, name),
+
+  // Lending or returning a folder remakes the computer with the new mounts (what it installed stays).
+  lendFolder: ({ agentId, path }) => {
+    const agent = db.agent(agentId)
+    if (!agent) return
+    const why = checkFolder(path, { dataDir })
+    if (why) throw new Error(why)
+    const folders = agent.folders ?? []
+    if (folders.some((f) => f.path === path)) return
+    setFolders(agent, [...folders, { name: folderName(path, folders.map((f) => f.name)), path, readOnly: false }])
+  },
+  folderAction: ({ agentId, name, action }) => {
+    const agent = db.agent(agentId)
+    if (!agent) return
+    const folders = agent.folders ?? []
+    setFolders(agent, action === 'return' ? folders.filter((f) => f.name !== name) : folders.map((f) => (f.name === name ? { ...f, readOnly: action === 'read_only' } : f)))
+  },
   openExternal: ({ url }) => toMain({ type: 'open', url }),
 
   saveRoutine: ({ routine }) => routines.save(routine),

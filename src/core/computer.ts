@@ -4,11 +4,12 @@
 // Mac; the computer only receives commands through these tools.
 import { spawn } from 'node:child_process'
 import { createHash, randomUUID } from 'node:crypto'
-import { mkdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
-import { basename, extname, join, posix } from 'node:path'
+import { existsSync, mkdirSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { homedir } from 'node:os'
+import { basename, extname, join, posix, sep } from 'node:path'
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
 import type { CoreEvent } from '../shared/rpc'
-import type { Agent, Artifact, ArtifactKind, ComputerInfo, Service } from '../shared/types'
+import { PROJECTS_DIR, type Agent, type Artifact, type ArtifactKind, type ComputerInfo, type LentFolder, type Service } from '../shared/types'
 import type { Db } from './db'
 import { textResult, type ToolDef } from './gateway'
 
@@ -18,6 +19,47 @@ const WORK = '/work'
 const MAX_OUTPUT = 30_000 // characters of command output handed back to the model
 const MAX_FILE = 200_000 // characters read_file returns
 const MAX_SHOW_BYTES = 50 * 1024 * 1024
+
+// ---------- folders lent from the Mac (M5.1) ----------
+
+// Why a folder can't be lent, or null. Only folders inside the home folder,
+// never the home itself, Library, hidden folders (~/.ssh, ~/.config…) or the app's own data.
+export function checkFolder(path: string, opts: { home?: string; dataDir: string }): string | null {
+  let real: string
+  try {
+    real = realpathSync(path)
+    if (!statSync(real).isDirectory()) return 'Isso não é uma pasta.'
+  } catch {
+    return 'Essa pasta não existe.'
+  }
+  const home = realpathSync(opts.home ?? homedir())
+  if (!real.startsWith(home + sep)) return 'Só dá pra emprestar pastas dentro da sua pasta de usuário.'
+  const top = real.slice(home.length + 1).split(sep)[0]!
+  if (top === 'Library' || top.startsWith('.')) return 'Essa pasta guarda configurações e credenciais do Mac; não dá pra emprestar.'
+  const data = existsSync(opts.dataDir) ? realpathSync(opts.dataDir) : opts.dataDir
+  if (data === real || data.startsWith(real + sep) || real.startsWith(data + sep)) return 'Essa pasta tem os dados do próprio agent-desk; não dá pra emprestar.'
+  return null
+}
+
+// /projetos/<name>: the folder's name, made safe, and unique among the agent's folders.
+export function folderName(path: string, taken: string[]): string {
+  const base = basename(path).toLowerCase().normalize('NFD').replace(/[^a-z0-9._-]+/g, '-').replace(/^[-.]+|-+$/g, '') || 'pasta'
+  let name = base
+  for (let i = 2; taken.includes(name); i++) name = `${base}-${i}`
+  return name
+}
+
+// Folders the Mac uses for its own builds of dependencies. Inside the computer
+// each gets a volume of its own, so Linux installs never replace the Mac's.
+const OWN_DEPS = ['node_modules', '.venv']
+
+export function mountArgs(container: string, folders: LentFolder[], exists: (p: string) => boolean = existsSync): string[] {
+  return folders.flatMap((f) => {
+    const at = `${PROJECTS_DIR}/${f.name}`
+    const deps = f.readOnly ? [] : OWN_DEPS.filter((d) => d === 'node_modules' || exists(join(f.path, d)))
+    return ['-v', `${f.path}:${at}${f.readOnly ? ':ro' : ''}`, ...deps.flatMap((d) => ['-v', `${container}-${f.name}-${d.replace('.', '')}:${at}/${d}`])]
+  })
+}
 
 export type Shooter = (opts: { url: string; width: number; height: number; fullPage: boolean }) => Promise<Buffer>
 
@@ -279,10 +321,29 @@ export class Computers {
     return p
   }
 
+  // The computer's state (what the agent installed) saved as an image, so it survives a remount.
+  private stateImage(agentId: string): string {
+    return `${this.name(agentId)}:estado`
+  }
+
   private async doEnsure(agentId: string): Promise<void> {
     const name = this.name(agentId)
-    const state = await docker(['inspect', '-f', '{{.State.Running}}', name], { timeoutMs: 15_000 })
-    if (state.code === 0 && state.stdout.trim() === 'true') {
+    const mounts = mountArgs(name, this.deps.db.agent(agentId)?.folders ?? [])
+    const sig = mounts.length ? createHash('sha1').update(JSON.stringify(mounts)).digest('hex').slice(0, 12) : ''
+    let state = await docker(['inspect', '-f', '{{.State.Running}} {{index .Config.Labels "agent-desk.mounts"}}', name], { timeoutMs: 15_000 })
+    const [running, raw = ''] = state.stdout.trim().split(' ')
+    const label = raw === '<no' ? '' : raw // "<no value>": made before folders existed
+    // Folders are mounted when the container is made: lending or returning one makes it again, from its saved state.
+    if (state.code === 0 && label !== sig) {
+      this.set(agentId, { state: 'starting', detail: 'Trocando as pastas emprestadas (reinicia o computador)…' })
+      const commit = await docker(['commit', name, this.stateImage(agentId)], { timeoutMs: 10 * 60_000 })
+      if (commit.code !== 0) return this.fail(agentId, commit.stderr)
+      await docker(['rm', '-f', name], { timeoutMs: 60_000 })
+      this.deps.db.removeServices(agentId)
+      this.ports.delete(agentId)
+      state = { code: 1, stdout: '', stderr: 'No such object' }
+    }
+    if (state.code === 0 && running === 'true') {
       if (!this.ports.has(agentId)) await this.readPorts(agentId)
       if (this.infos.get(agentId)?.state !== 'running') this.set(agentId, { state: 'running', services: await this.serviceStatus(agentId) })
       return
@@ -297,7 +358,9 @@ export class Computers {
       const r = await docker(['start', name], { timeoutMs: 60_000 })
       if (r.code !== 0) return this.fail(agentId, r.stderr)
     } else {
-      if ((await docker(['image', 'inspect', IMAGE], { timeoutMs: 15_000 })).code !== 0) {
+      const saved = (await docker(['image', 'inspect', this.stateImage(agentId)], { timeoutMs: 15_000 })).code === 0
+      const image = saved ? this.stateImage(agentId) : IMAGE
+      if (!saved && (await docker(['image', 'inspect', IMAGE], { timeoutMs: 15_000 })).code !== 0) {
         this.set(agentId, { state: 'starting', detail: 'Baixando o sistema do computador (só na primeira vez, alguns minutos)…' })
         const pull = await docker(['pull', IMAGE], { timeoutMs: 30 * 60_000 })
         if (pull.code !== 0) return this.fail(agentId, pull.stderr)
@@ -313,18 +376,27 @@ export class Computers {
           '--hostname', agent?.handle || 'agente',
           '--label', 'agent-desk=1',
           '--label', `agent-desk.agent=${agentId}`,
+          '--label', `agent-desk.mounts=${sig}`,
           '--init',
           '--memory', '3g',
           '--cpus', '2',
           '-w', WORK,
           '-v', `${folder}:${WORK}`,
+          ...mounts,
           ...PORTS.flatMap((p) => ['-p', `127.0.0.1::${p}`]),
-          IMAGE,
+          image,
           'sleep', 'infinity'
         ],
         { timeoutMs: 120_000 }
       )
       if (run.code !== 0) return this.fail(agentId, run.stderr)
+      // Lent repositories belong to the Mac's user, not root: let git work in them.
+      await docker(['exec', name, 'git', 'config', '--global', '--add', 'safe.directory', '*'], { timeoutMs: 15_000 })
+      // Returned folders leave their empty mount points in the saved state. Only empty
+      // directories of names no longer lent go, so nothing mounted is ever touched.
+      const lent = (this.deps.db.agent(agentId)?.folders ?? []).map((f) => f.name)
+      const clean = `cd ${PROJECTS_DIR} 2>/dev/null || exit 0; for d in */; do d="\${d%/}"; case " ${lent.join(' ')} " in *" $d "*) ;; *) find "$d" -xdev -depth -type d -empty -delete ;; esac; done; true`
+      await docker(['exec', name, 'bash', '-c', clean], { timeoutMs: 15_000 })
     }
     await this.readPorts(agentId)
     this.set(agentId, { state: 'running', services: await this.serviceStatus(agentId) })
@@ -357,6 +429,10 @@ export class Computers {
   // Everything goes: the container, what was installed, and /work.
   async erase(agentId: string): Promise<void> {
     await docker(['rm', '-f', this.name(agentId)], { timeoutMs: 60_000 })
+    await docker(['rmi', '-f', this.stateImage(agentId)], { timeoutMs: 60_000 })
+    const volumes = await docker(['volume', 'ls', '-q', '--filter', `name=^${this.name(agentId)}-`], { timeoutMs: 15_000 })
+    const ids = volumes.stdout.split('\n').filter(Boolean)
+    if (ids.length) await docker(['volume', 'rm', '-f', ...ids], { timeoutMs: 60_000 })
     rmSync(join(this.deps.dataDir, 'computers', agentId), { recursive: true, force: true })
     this.deps.db.removeServices(agentId)
     this.ports.delete(agentId)

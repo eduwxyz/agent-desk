@@ -9,6 +9,7 @@ ipcRenderer.on('core:port', (event) => {
 
 contextBridge.exposeInMainWorld('agentDesk', {
   connect: (): void => ipcRenderer.send('core:connect'),
+  pickFolder: (): Promise<string | null> => ipcRenderer.invoke('pick-folder') as Promise<string | null>,
   // A click on a notification opens its conversation.
   onNavigate: (cb: (conversationId: string) => void): void => {
     ipcRenderer.on('navigate', (_e, id: unknown) => typeof id === 'string' && cb(id))

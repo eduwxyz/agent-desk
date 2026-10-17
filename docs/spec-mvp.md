@@ -192,7 +192,11 @@ Cada agente pode ganhar um computador próprio: um Linux isolado dentro do Mac, 
   - prints e arquivos mostrados aparecem na mensagem e abrem num **painel lateral** (HTML num iframe isolado, sem acesso ao app);
   - serviço iniciado vira um card com **Abrir**, que mostra o app rodando no painel;
   - página do agente: estado do computador, serviços (abrir, parar), **Abrir pasta**, **Reiniciar** e **Apagar computador** (some tudo, inclusive `/work`).
-- Depois (M5.1): emprestar uma pasta do Mac pro computador do agente, pra ele trabalhar num projeto existente.
+- **Pastas emprestadas (M5.1):** na página do agente, **Emprestar pasta…** abre o seletor do Mac; a pasta aparece no computador dele em `/projetos/<nome>`, com **Pode mudar** ou **Só ler**, e **Devolver**.
+  - Só pastas dentro da pasta do usuário: nunca a própria, `~/Library`, pastas ocultas (`~/.ssh`, `~/.config`) nem os dados do app. O core confere (seguindo symlinks); o renderer não grava pasta direto.
+  - O Docker só monta pasta ao criar o container. Emprestar ou devolver salva o estado do computador numa imagem (`docker commit`) e recria a partir dela: o que ele instalou fica, os serviços param.
+  - `node_modules` (sempre) e `.venv` (quando existe) de cada pasta com escrita ganham um volume próprio do Linux, então um `npm install` dele não troca os binários do Mac.
+  - O prompt diz quais pastas são dele, que são os arquivos de verdade, pra olhar o `git status` antes, mexer só no pedido e conferir com os testes. Sem credenciais, push e deploy ficam comigo.
 
 ### 14. Rotinas (M6)
 
@@ -333,7 +337,7 @@ Até aqui tudo começa com uma mensagem minha. Uma rotina faz o agente trabalhar
 
 4. **M4, memória (feito):** resumo por conversa, memórias sobre mim e por agente, ferramenta `lembrar`, extração na consolidação, esquecer com registro, Revisar. (AC 16, 17, 18, 19) Testado com o Claude Code real: o Sonnet guardou sozinho uma preferência dita de passagem, na terceira pessoa; outro agente usou ela num canal; o Haiku resumiu, extraiu só o que eu disse (ignorou um palpite do agente) e não recriou uma memória esquecida ao reler as mesmas mensagens.
 
-5. **M5, computador do agente (feito):** container por agente, ferramentas `bash`, arquivos, serviços, `screenshot` e `show_file`, artefatos e painel lateral. (AC 20, 21) Testado com o Claude Code real: pedi um dashboard de vendas com gráfico, servido e com print; o Sonnet escreveu, subiu o serviço, tirou o print e respondeu em 15 s, sem nenhum pedido de aprovação. Arquivos são lidos e escritos sempre por dentro do container: um symlink em `/work` apontando pro Mac não alcança o Mac. Codex com computador ainda não testado (depende do login próprio).
+5. **M5, computador do agente (feito):** container por agente, ferramentas `bash`, arquivos, serviços, `screenshot` e `show_file`, artefatos e painel lateral. (AC 20, 21) Testado com o Claude Code real: pedi um dashboard de vendas com gráfico, servido e com print; o Sonnet escreveu, subiu o serviço, tirou o print e respondeu em 15 s, sem nenhum pedido de aprovação. Arquivos são lidos e escritos sempre por dentro do container: um symlink em `/work` apontando pro Mac não alcança o Mac. Codex com computador ainda não testado (depende do login próprio). Pastas emprestadas (M5.1): num projetinho com um teste falhando, a Lia olhou o `git status`, achou o bug, corrigiu e rodou os testes em 11 s; no Mac, o `git diff` tinha só a linha certa e os testes passavam.
 
 6. **M6, rotinas (feito):** agendador, tela de Rotinas, mensagem de rotina na conversa, notificação ao terminar, abrir ao ligar o Mac. (AC 22, 23) Testado com o Claude Code real: uma rotina na DM da Lia, disparada por Rodar agora, respondeu em 5 s, sem perguntar se podia; a DM é criada ao salvar se ainda não existir. Horário, atraso, pulo após 12 h, uma execução por vez e limite testados com relógio simulado. Abrir ao ligar o Mac só pode ser conferido no app empacotado. Depois: "daqui a 1 minuto me manda uma frase" na DM da Lia virou uma rotina de uma vez em 3 s, que disparou sozinha no minuto seguinte.
 

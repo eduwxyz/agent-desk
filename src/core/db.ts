@@ -1,5 +1,5 @@
 import { DatabaseSync } from 'node:sqlite'
-import type { Agent, AgentColor, Approval, ApprovalState, Artifact, ArtifactKind, Author, Connector, ConnectorAuth, ConnectorTool, Conversation, Effort, Memory, MemoryMode, MemoryState, Message, Receipt, Routine, RoutineRun, Run, Settings, ToolClass } from '../shared/types'
+import type { Agent, AgentColor, Approval, ApprovalState, Artifact, ArtifactKind, Author, Connector, ConnectorAuth, ConnectorTool, Conversation, Effort, LentFolder, Memory, MemoryMode, MemoryState, Message, Receipt, Routine, RoutineRun, Run, Settings, ToolClass } from '../shared/types'
 
 // Each entry runs once, in order; PRAGMA user_version records how far we got.
 const MIGRATIONS = [
@@ -167,6 +167,9 @@ const MIGRATIONS = [
   `
   ALTER TABLE routines ADD COLUMN once INTEGER NOT NULL DEFAULT 0;
   ALTER TABLE routines ADD COLUMN created_by TEXT;
+  `,
+  `
+  ALTER TABLE agents ADD COLUMN folders TEXT NOT NULL DEFAULT '[]';
   `
 ]
 
@@ -248,6 +251,7 @@ export class Db {
       grants: JSON.parse(str(r['grants']) || '{}') as Agent['grants'],
       memory: (str(r['memory_mode']) || 'auto') as MemoryMode,
       computer: r['computer'] === 1,
+      folders: JSON.parse(str(r['folders']) || '[]') as LentFolder[],
       archived: r['archived'] === 1
     }
   }
@@ -272,6 +276,11 @@ export class Db {
            computer = excluded.computer, archived = excluded.archived`
       )
       .run(a.id, a.name, a.handle, a.role, a.color, a.instructions, a.modelId, a.effort, a.limit, JSON.stringify(a.grants), a.memory ?? 'auto', a.computer ? 1 : 0, a.archived ? 1 : 0, Date.now())
+  }
+
+  // Kept apart from saveAgent: folders change only after the core checks them.
+  setFolders(agentId: string, folders: LentFolder[]): void {
+    this.db.prepare('UPDATE agents SET folders = ? WHERE id = ?').run(JSON.stringify(folders), agentId)
   }
 
   usedThisMonth(agentId: string): number {

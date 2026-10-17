@@ -1948,3 +1948,33 @@ table.csv th {
 .routine-once {
   margin-bottom: 8px;
 }
+
+/* ---------- folders lent to a computer ---------- */
+.folders {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 14px 0 4px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+.folders .table {
+  margin: 0;
+}
+.folder {
+  align-items: center;
+  gap: 10px;
+}
+.folder__body {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.folder__body .small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.folders .hint {
+  margin: 0;
+}

@@ -1,11 +1,11 @@
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, readFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import type { CoreEvent } from '../src/shared/rpc'
 import type { Agent, EngineId, Settings } from '../src/shared/types'
-import { artifactKind, clipOutput, Computers, containerPath, formatExec, hostUrl, listening } from '../src/core/computer'
+import { artifactKind, checkFolder, clipOutput, Computers, containerPath, folderName, formatExec, hostUrl, listening, mountArgs } from '../src/core/computer'
 import { Db } from '../src/core/db'
 import { fakeEngine } from '../src/core/engines/fake'
 import type { Engine } from '../src/core/engines/types'
@@ -54,6 +54,37 @@ describe('helpers', () => {
     expect(artifactKind('relatorio.md')).toBe('markdown')
     expect(artifactKind('vendas.csv')).toBe('csv')
     expect(artifactKind('app.zip')).toBe('file')
+  })
+})
+
+describe('lent folders', () => {
+  it('lends only project folders inside home: not home itself, Library, hidden folders or the app data', () => {
+    const home = mkdtempSync(join(tmpdir(), 'ad-home-'))
+    for (const d of ['projetos/app/.dados', 'Library/Keychains', '.ssh', 'Library/Application Support/agent-desk']) mkdirSync(join(home, d), { recursive: true })
+    writeFileSync(join(home, 'arquivo.txt'), '')
+    const dataDir = join(home, 'Library/Application Support/agent-desk')
+    const check = (p: string): string | null => checkFolder(join(home, p), { home, dataDir })
+    expect(check('projetos/app')).toBeNull()
+    expect(check('')).toMatch(/dentro da sua pasta/)
+    expect(check('Library/Keychains')).toMatch(/credenciais/)
+    expect(check('.ssh')).toMatch(/credenciais/)
+    expect(check('arquivo.txt')).toMatch(/não é uma pasta/)
+    expect(check('nada')).toMatch(/não existe/)
+    expect(checkFolder(tmpdir(), { home, dataDir })).toMatch(/dentro da sua pasta/)
+    expect(checkFolder(join(home, 'projetos'), { home, dataDir: join(home, 'projetos/app/.dados') })).toMatch(/dados do próprio/)
+  })
+
+  it('names each folder after itself, safely and without repeats', () => {
+    expect(folderName('/Users/edu/Documents/Meu Projeto', [])).toBe('meu-projeto')
+    expect(folderName('/Users/edu/a/app', ['app'])).toBe('app-2')
+    expect(folderName('/Users/edu/.coisa', [])).toBe('coisa')
+  })
+
+  it("gives Linux its own node_modules and .venv, never the Mac's, and mounts read-only when asked", () => {
+    const has = (p: string): boolean => p.endsWith('/py/.venv')
+    expect(mountArgs('c', [{ name: 'app', path: '/m/app', readOnly: false }], has)).toEqual(['-v', '/m/app:/projetos/app', '-v', 'c-app-node_modules:/projetos/app/node_modules'])
+    expect(mountArgs('c', [{ name: 'py', path: '/m/py', readOnly: false }], has)).toContain('c-py-venv:/projetos/py/.venv')
+    expect(mountArgs('c', [{ name: 'ro', path: '/m/ro', readOnly: true }], has)).toEqual(['-v', '/m/ro:/projetos/ro:ro'])
   })
 })
 
@@ -182,4 +213,31 @@ describe.skipIf(!hasDocker)('computer (Docker)', () => {
     expect(reply('d2').text).not.toContain('oi do computador')
     expect(reply('d2').run?.steps.map((s) => s.label)).not.toContain('Rodou')
   }, 60_000)
+
+  it("works on a lent Mac folder, keeps what it installed, and doesn't touch the Mac's node_modules", async () => {
+    const project = mkdtempSync(join(tmpdir(), 'ad-project-'))
+    writeFileSync(join(project, 'README.md'), 'projeto do Mac')
+    mkdirSync(join(project, 'node_modules'))
+    writeFileSync(join(project, 'node_modules', 'mac.txt'), 'binário do Mac')
+    await run('bash', { command: 'echo instalado > /opt/marca' })
+
+    db.setFolders(lia.id, [{ name: 'app', path: project, readOnly: false }])
+    await computers.ensure(lia.id)
+    lia = db.agent(lia.id)!
+    expect((await run('bash', { command: 'cat /opt/marca /projetos/app/README.md' })).text).toContain('instalado\nprojeto do Mac')
+    await run('bash', { command: 'cd /projetos/app && echo novo > feito.txt && ls node_modules && echo linux > node_modules/linux.txt && git init -q && git status --short' })
+    expect(readFileSync(join(project, 'feito.txt'), 'utf8')).toBe('novo\n')
+    expect(existsSync(join(project, 'node_modules', 'linux.txt'))).toBe(false)
+    expect(readFileSync(join(project, 'node_modules', 'mac.txt'), 'utf8')).toBe('binário do Mac')
+
+    db.setFolders(lia.id, [{ name: 'app', path: project, readOnly: true }])
+    await computers.ensure(lia.id)
+    expect((await run('write_file', { path: '/projetos/app/x.txt', content: 'x' })).text).toContain('Read-only file system')
+    expect(existsSync(join(project, 'x.txt'))).toBe(false)
+
+    db.setFolders(lia.id, [])
+    await computers.ensure(lia.id)
+    expect((await run('bash', { command: 'ls /projetos/app' })).isError).toBe(true)
+    expect((await run('bash', { command: 'cat /opt/marca' })).text).toContain('instalado')
+  }, 240_000)
 })

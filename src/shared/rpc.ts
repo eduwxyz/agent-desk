@@ -43,6 +43,8 @@ export interface Api {
   summarizeNow(p: { conversationId: string }): void
   computerAction(p: { agentId: string; action: 'start' | 'restart' | 'erase' | 'open_folder' | 'refresh' }): void
   stopService(p: { agentId: string; name: string }): void
+  lendFolder(p: { agentId: string; path: string }): void // throws why it can't, for the page
+  folderAction(p: { agentId: string; name: string; action: 'read_only' | 'read_write' | 'return' }): void
   openExternal(p: { url: string }): void
   saveRoutine(p: { routine: RoutineInput }): Routine // throws a message for the form
   removeRoutine(p: { id: string }): void
