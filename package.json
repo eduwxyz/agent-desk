@@ -14,7 +14,7 @@
     "test": "vitest run",
     "test:e2e": "npm run build && node --test e2e/",
     "dist": "npm run build && electron-builder --mac --dir --config.directories.output=\"$HOME/Library/Caches/agent-desk/dist\"",
-    "install-app": "npm run dist && ditto \"$HOME/Library/Caches/agent-desk/dist/mac-arm64/agent-desk.app\" /Applications/agent-desk.app"
+    "install-app": "npm run dist && sh scripts/install-app.sh"
   },
   "devDependencies": {
     "@types/node": "^26.6.5",
