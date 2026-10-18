@@ -67,7 +67,13 @@ Usuário do MVP: eu, numa máquina só. Quem baixar o repositório usa do mesmo 
   4. Steps já concluídos do run (resultados de ferramenta, aprovações, respostas)
 
   Os itens 1 e 2 vão como system prompt. As ferramentas vêm do gateway.
-- Limites por resposta, configuráveis em Configurações: máximo de 50 chamadas de ferramenta (contadas no gateway) e 15 min de duração (o default do rascunho era 25 e 10, curto demais pra um agente com computador). Passou das chamadas, o gateway recusa as próximas e pede pro agente encerrar dizendo o que fez; se ele insistir, o turno é cortado. Passou do tempo, o turno é cortado e o que ele já escreveu fica.
+- **Travas por resposta** (M10), no lugar dos limites de 50 chamadas e 15 min do M7, que cortavam trabalho longo que ia bem (duas respostas do Staff morreram nos 15 min instalando o Swift, ~1 M de tokens cada, sem resultado). Nenhuma corta pelo tempo ou pelo número de ferramentas:
+  - **Loop:** a mesma chamada (ferramenta + argumentos) com o mesmo resultado. Na 3ª vez o resultado volta com um aviso pra mudar de abordagem; na 5ª, a resposta para. Rodar o mesmo teste depois de editar o código dá outro resultado e não conta. A mesma busca na web 5 vezes também para. **8 ferramentas falhando seguidas** param.
+  - **Travado:** 20 min sem nenhum sinal (texto, tokens, ferramenta terminando). Uma ferramenta rodando tem o próprio tempo máximo e não conta como silêncio.
+  - **Teto de gasto:** por resposta, 10% do limite do mês do agente. Ao passar, as próximas ferramentas são recusadas com "escreva o que fez e o que falta e encerre"; a resposta fica **pausada**, com **Continuar**, que abre uma resposta nova com os passos feitos na tarefa. Se ela seguir gastando até 30% acima do teto, é cortada (e fica pausada do mesmo jeito). No Codex o uso só chega no fim, então o teto não pausa no meio.
+  - O teto (%) e o tempo de travado ficam em Configurações.
+- **Contagem justa:** no limite do mês, no teto e nos recibos, um token lido do cache conta 10% (é o que ele custa). O recibo mostra entrada, cache e saída separados, também numa resposta cortada.
+- **Cache da conversa:** a conversa vai pro Claude Code como blocos de texto, um por mensagem (`--input-format stream-json`), sem nada no fim que mude a cada resposta (a hora vai no cabeçalho de cada mensagem, com o dia da semana; "responda à última" foi pro system prompt). A próxima resposta começa com os mesmos blocos e lê a conversa do cache (medido: 92% da entrada, contra só o system prompt antes). O cache da assinatura dura 1 h. A janela só muda de começo quando a memória consolida, a cada ~20 mensagens.
 - No máximo 4 runs simultâneos. O resto fica em `queued`.
 
 ### 4. Ferramentas embutidas (MVP)
@@ -272,7 +278,7 @@ Todo agente pesquisa na web e lê páginas, com a ferramenta do próprio motor, 
 21. **Isolamento do computador (M5):** um comando do agente não enxerga arquivos do Mac fora de `/work`, nenhuma credencial das CLIs está no container, e as portas só respondem em `127.0.0.1`.
 22. **Rotina (M6):** crio "todo dia às 9:00, Lia, resuma as issues abertas no Linear" no #engenharia. Às 9:00 aparece a mensagem da rotina, a Lia responde e chega uma notificação. Com o app fechado às 9:00 e aberto às 9:40, ela roda uma vez, como atrasada; aberto no dia seguinte, não roda a de ontem.
 23. **Rotina com governança (M6):** uma rotina cujo agente já passou do limite não abre a CLI; uma que pede ação sensível fica esperando aprovação, e a execução seguinte não começa enquanto a anterior roda.
-24. **Nada roda solto (M7):** um agente em loop de ferramentas é cortado na 50ª chamada (+3 de tolerância) e um turno travado, nos 15 min; os dois terminam como falha com o motivo. Ao passar de 80% do limite do mês, chega um aviso na conversa e uma notificação, uma vez só.
+24. **Nada roda solto (M10):** um agente que repete a mesma chamada com o mesmo erro é avisado na 3ª vez e parado na 5ª; um que roda o mesmo teste 30 vezes enquanto edita o código segue até terminar, passando de 50 ferramentas. Um turno sem sinal por 20 min é encerrado; um que demora mas dá sinal, não. Ao passar do teto da resposta, ela pausa com Continuar, e o Continuar segue com os passos feitos. Ao passar de 80% do limite do mês, chega um aviso na conversa e uma notificação, uma vez só.
 25. **Projeto (M8):** ligo #simula-oab à pasta do projeto; a Lia (com a pasta) e o PM (sem computador) recebem o `CLAUDE.md` e "O momento" no prompt, e só a Lia é avisada de que tem a pasta em `/projetos/`. Uma decisão que a Lia guarda como do projeto chega ao PM no canal e não aparece numa DM. Um symlink pra fora da pasta listado como arquivo de contexto não é lido.
 26. **Web (M9):** pergunto "qual a versão mais recente do Electron?"; o agente pesquisa, lê a página de releases e responde com o link, e eu vejo "Pesquisou na web" e "Leu uma página" nos passos. Com a Web desligada, a CLI não recebe as ferramentas.
 
@@ -370,6 +376,7 @@ Todo agente pesquisa na web e lê páginas, com a ferramenta do próprio motor, 
 
 8. **M8, projetos (feito):** canal ligado a uma pasta, contexto lido a cada resposta, memória do projeto, pasta emprestada por acesso no canal. (AC 25)
 9. **M9, web (feito):** busca e leitura de páginas pela ferramenta do próprio motor, ligada por padrão, com passos e contando no limite de chamadas. (AC 26) Testado com o Claude Code e o Codex reais: os dois pesquisaram e responderam com o link.
+10. **M10, travas e cache (feito):** loop, travado e teto com Continuar no lugar de 50 chamadas e 15 min; cache lido conta 10%; conversa em blocos pro cache. (AC 24) Testado com o Claude Code real: a segunda resposta leu 92% do cache, e um teto baixo pausou e continuou.
 
 O MVP termina quando os oito estiverem prontos e eu usar o app por uma semana no dia a dia.
 

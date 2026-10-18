@@ -221,6 +221,8 @@ export function outcome(reply: Message): string {
       return `Perguntou: ${reply.run.question ?? ''}`.trim()
     case 'limit_reached':
       return 'Parou: chegou no limite de tokens do mês.'
+    case 'paused':
+      return 'Pausou no teto da resposta. Abra pra continuar.'
     case 'failed':
       return `Falhou: ${reply.run.error ?? 'erro desconhecido'}`
     case 'stopped':

@@ -25,8 +25,9 @@ import {
   useStore,
   EFFORTS,
   ENGINES,
-  RUN_MAX_MINUTES,
-  RUN_MAX_TOOL_CALLS,
+  RUN_BUDGET_PCT,
+  RUN_STALL_MINUTES,
+  countedTokens,
   type Agent,
   type AgentColor,
   type Connector,
@@ -735,7 +736,7 @@ function ReceiptRow({ id }: { id: string }): ReactNode {
       <span className="muted small">
         <ModelLabel id={r.model} />
       </span>
-      <span className="mono small">{tokens(r.inputTokens + r.outputTokens)}</span>
+      <span className="mono small">{tokens(countedTokens(r))}</span>
       <span className="muted small">{time(m.at)}</span>
     </button>
   )
@@ -1162,21 +1163,21 @@ export function SettingsPage(): ReactNode {
                 onChange={(e) => updateSettings({ defaultLimit: Math.max(0, Math.round(Number(e.target.value) * 1_000_000)) })}
               />
             </Field>
-            <Field label="Ferramentas por resposta" hint="Passou disso, o agente encerra dizendo o que fez.">
-              <input
-                type="number"
-                min={5}
-                step={5}
-                value={settings.runMaxToolCalls ?? RUN_MAX_TOOL_CALLS}
-                onChange={(e) => updateSettings({ runMaxToolCalls: Math.max(5, Math.round(Number(e.target.value))) })}
-              />
-            </Field>
-            <Field label="Minutos por resposta" hint="Vale também pras rotinas, que rodam sem você olhando.">
+            <Field label="Teto por resposta (% do limite do mês)" hint="Chegou nele, o agente pausa e você decide se continua.">
               <input
                 type="number"
                 min={1}
-                value={settings.runMaxMinutes ?? RUN_MAX_MINUTES}
-                onChange={(e) => updateSettings({ runMaxMinutes: Math.max(1, Math.round(Number(e.target.value))) })}
+                max={100}
+                value={settings.runBudgetPct ?? RUN_BUDGET_PCT}
+                onChange={(e) => updateSettings({ runBudgetPct: Math.min(100, Math.max(1, Math.round(Number(e.target.value)))) })}
+              />
+            </Field>
+            <Field label="Travado depois de (minutos sem sinal)" hint="Sem texto nem ferramenta terminando. Trabalho longo que anda não é cortado.">
+              <input
+                type="number"
+                min={5}
+                value={settings.runStallMinutes ?? RUN_STALL_MINUTES}
+                onChange={(e) => updateSettings({ runStallMinutes: Math.max(5, Math.round(Number(e.target.value))) })}
               />
             </Field>
             <Field label="Expiração de aprovações">

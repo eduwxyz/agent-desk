@@ -9,12 +9,13 @@ const WEB_TOOLS = ['WebSearch', 'WebFetch'] // run on Anthropic's side, on the s
 // --bare: it turns off the subscription login. The app's gateway, when given,
 // is the only MCP server, and its tools are pre-allowed: the gateway decides.
 // With web, the only built-in tools are web search and page reading.
-export function claudeArgs(turn: Pick<Turn, 'model' | 'effort' | 'system' | 'mcpUrl' | 'web'>): string[] {
+export function claudeArgs(turn: Pick<Turn, 'model' | 'effort' | 'system' | 'mcpUrl' | 'web' | 'blocks'>): string[] {
   const web = turn.web ? WEB_TOOLS : []
   const allowed = [...(turn.mcpUrl ? [`mcp__${GATEWAY_NAME}`] : []), ...web]
   const gateway = turn.mcpUrl ? ['--mcp-config', JSON.stringify({ mcpServers: { [GATEWAY_NAME]: { type: 'http', url: turn.mcpUrl } } })] : []
   return [
     '-p',
+    ...(turn.blocks?.some((b) => b.trim()) ? ['--input-format', 'stream-json'] : []),
     '--output-format', 'stream-json',
     '--verbose',
     '--include-partial-messages',
@@ -30,9 +31,20 @@ export function claudeArgs(turn: Pick<Turn, 'model' | 'effort' | 'system' | 'mcp
   ]
 }
 
+// With blocks, one user message with a text block per piece: the CLI marks the
+// last block for caching, and the next turn, which starts with the same blocks,
+// reads them back from the cache instead of sending them again.
+export function claudeInput(turn: Pick<Turn, 'prompt' | 'blocks'>): string {
+  const blocks = turn.blocks?.filter((b) => b.trim())
+  if (!blocks?.length) return turn.prompt
+  return `${JSON.stringify({ type: 'user', message: { role: 'user', content: blocks.map((text) => ({ type: 'text', text })) } })}\n`
+}
+
 export function claudeParser(): Parser {
   let doneTokens = 0 // tokens of model calls already finished in this turn
+  let doneCache = 0
   let callInput = 0
+  let callCache = 0
   let callOutput = 0
   let finished = false
   let wroteText = false // text from an earlier model call in this turn
@@ -49,11 +61,13 @@ export function claudeParser(): Parser {
         if (!e) return []
         if (e['type'] === 'message_start') {
           doneTokens += callInput + callOutput
+          doneCache += callCache
           const u = ((e['message'] as Record<string, unknown> | undefined)?.['usage'] ?? {}) as Record<string, unknown>
-          callInput = num(u['input_tokens']) + num(u['cache_read_input_tokens']) + num(u['cache_creation_input_tokens'])
+          callCache = num(u['cache_read_input_tokens'])
+          callInput = num(u['input_tokens']) + callCache + num(u['cache_creation_input_tokens'])
           callOutput = 0
           newCall = true
-          out.push({ type: 'progress', tokens: doneTokens + callInput })
+          out.push({ type: 'progress', tokens: doneTokens + callInput, cacheRead: doneCache + callCache })
         } else if (e['type'] === 'content_block_delta') {
           const d = e['delta'] as Record<string, unknown> | undefined
           if (d?.['type'] === 'text_delta' && typeof d['text'] === 'string') {
@@ -65,7 +79,7 @@ export function claudeParser(): Parser {
           }
         } else if (e['type'] === 'message_delta') {
           callOutput = num((e['usage'] as Record<string, unknown> | undefined)?.['output_tokens'])
-          out.push({ type: 'progress', tokens: doneTokens + callInput + callOutput })
+          out.push({ type: 'progress', tokens: doneTokens + callInput + callOutput, cacheRead: doneCache + callCache })
         }
       } else if (ev['type'] === 'assistant') {
         // The full message after its stream: where built-in tool calls show up whole.
@@ -115,7 +129,7 @@ export function claudeEngine(bin: () => string | undefined): Engine {
         yield { type: 'error', message: 'O Claude Code não está instalado. Veja em Configurações.' }
         return
       }
-      yield* runCli({ bin: path, args: claudeArgs(turn), stdin: turn.prompt, cwd: turn.cwd, signal: turn.signal, parser: claudeParser(), env: { ...process.env, MCP_TOOL_TIMEOUT: '900000' } })
+      yield* runCli({ bin: path, args: claudeArgs(turn), stdin: claudeInput(turn), cwd: turn.cwd, signal: turn.signal, parser: claudeParser(), env: { ...process.env, MCP_TOOL_TIMEOUT: '900000' } })
     }
   }
 }

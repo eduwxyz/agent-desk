@@ -65,11 +65,14 @@ describe('transcript', () => {
   ]
 
   it('labels authors, marks the agent itself, skips system lines and empty messages', () => {
-    const t = transcript({ agent: lia, conversation: channel, messages, agents: [lia, theo], me: 'Edu' })
-    expect(t).toContain('[Edu · 17/10, 14:02]\nOi, time')
-    expect(t).toContain('[Theo · agente · 17/10, 14:02]\nOi!')
-    expect(t).toContain('[Lia (você) · agente · 17/10, 14:02]\nOlá')
-    expect(t).not.toContain('Router chamou')
-    expect(t.endsWith('Responda à última mensagem como Lia.')).toBe(true)
+    const blocks = transcript({ agent: lia, conversation: channel, messages, agents: [lia, theo], me: 'Edu' })
+    expect(blocks).toEqual(['Conversa em #engenharia, das mais antigas pras mais novas:', '[Edu · sáb 17/10 14:02]\nOi, time', '[Theo · agente · sáb 17/10 14:02]\nOi!', '[Lia (você) · agente · sáb 17/10 14:02]\nOlá'])
+  })
+
+  it("keeps every block of a turn in the next one, so they come from the cache; a task goes last, with the time", () => {
+    const first = transcript({ agent: lia, conversation: channel, messages: messages.slice(0, 3), agents: [lia, theo], me: 'Edu' })
+    const next = transcript({ agent: lia, conversation: channel, messages, agents: [lia, theo], me: 'Edu', task: 'Edu aprovou o pedido.' })
+    expect(next.slice(0, first.length)).toEqual(first)
+    expect(next.at(-1)).toMatch(/^Edu aprovou o pedido\.\n\nAgora: .+\.$/)
   })
 })

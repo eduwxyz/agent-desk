@@ -15,6 +15,8 @@ import {
   openDm,
   removeRoutine,
   retryRun,
+  continueRun,
+  countedTokens,
   sendMessage,
   stopRun,
   summarizeNow,
@@ -206,6 +208,14 @@ function MessageRow({ message, grouped }: { message: Message; grouped: boolean }
         {message.run?.status === 'stopped' && <div className="note">Interrompido por você.</div>}
         {message.run?.status === 'interrupted' && <div className="note">Interrompido: o app fechou no meio da resposta.</div>}
         {message.run?.error && <div className="note note--error">{message.run.error}</div>}
+        {message.run?.status === 'paused' && (
+          <>
+            <div className="note">Pausei: cheguei no teto desta resposta ({tokens(message.run.budget ?? 0)} tokens). Continuo de onde parei?</div>
+            <button className="btn btn--xs retry" onClick={() => continueRun(message.id)}>
+              Continuar
+            </button>
+          </>
+        )}
         {message.run && ['failed', 'stopped', 'interrupted', 'limit_reached'].includes(message.run.status) && (
           <button className="btn btn--xs retry" onClick={() => retryRun(message.id)}>
             Tentar de novo
@@ -434,7 +444,7 @@ function StepRow({ step }: { step: Step }): ReactNode {
 function ReceiptLine({ receipt }: { receipt: NonNullable<NonNullable<Message['run']>['receipt']> }): ReactNode {
   const model = useStore((s) => modelById(s, receipt.model))
   const [open, setOpen] = useState(false)
-  const total = receipt.inputTokens + receipt.outputTokens
+  const total = countedTokens(receipt)
   return (
     <div className="receipt">
       <button className="receipt__line" onClick={() => setOpen(!open)} title="Ver recibo">
@@ -444,7 +454,7 @@ function ReceiptLine({ receipt }: { receipt: NonNullable<NonNullable<Message['ru
         <dl className="receipt__table">
           <dt>Entrada</dt>
           <dd>{tokens(receipt.inputTokens - receipt.cacheReadTokens)}</dd>
-          <dt>Do cache</dt>
+          <dt title="Ler do cache custa cerca de um décimo: conta 10% no limite.">Do cache (conta 10%)</dt>
           <dd>{tokens(receipt.cacheReadTokens)}</dd>
           <dt>Saída</dt>
           <dd>{tokens(receipt.outputTokens)}</dd>

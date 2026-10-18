@@ -303,6 +303,7 @@ export const sendMessage = (conversationId: string, text: string): void => {
 
 export const stopRun = (messageId: string): void => void call('stopRun', { messageId })
 export const retryRun = (messageId: string): void => void call('retryRun', { messageId })
+export const continueRun = (messageId: string): void => void call('continueRun', { messageId })
 
 export const decideApproval = (id: string, decision: 'approved' | 'refused', reason?: string): void =>
   void call('decideApproval', { id, decision, reason })

@@ -199,6 +199,8 @@ const api: Api = {
 
   retryRun: ({ messageId }) => runner.retry(messageId),
 
+  continueRun: ({ messageId }) => void runner.continue(messageId),
+
   saveAgent: ({ agent, channelIds }) => {
     const clean: Agent = { ...agent, name: agent.name.trim(), handle: agent.handle.trim().toLowerCase() }
     const before = db.agent(clean.id)

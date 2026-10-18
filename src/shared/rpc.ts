@@ -21,6 +21,7 @@ export interface Api {
   sendMessage(p: { conversationId: string; text: string }): void
   stopRun(p: { messageId: string }): void
   retryRun(p: { messageId: string }): void
+  continueRun(p: { messageId: string }): void // a reply paused at its budget goes on
   saveAgent(p: { agent: Agent; channelIds: string[] }): void
   createChannel(p: { name: string }): string
   openDm(p: { agentId: string }): string

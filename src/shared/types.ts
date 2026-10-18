@@ -94,7 +94,7 @@ export interface Receipt {
   apiCostUsd?: number // what the same usage would cost on the API, when the CLI reports it
 }
 
-export type RunStatus = 'working' | 'waiting_input' | 'waiting_approval' | 'done' | 'stopped' | 'limit_reached' | 'failed' | 'interrupted'
+export type RunStatus = 'working' | 'waiting_input' | 'waiting_approval' | 'done' | 'stopped' | 'limit_reached' | 'failed' | 'interrupted' | 'paused'
 
 export interface Run {
   status: RunStatus
@@ -108,6 +108,7 @@ export interface Run {
   artifactIds?: string[] // files and screenshots shown in this reply
   services?: string[] // services started in this reply, by name, on the author's computer
   routineIds?: string[] // routines scheduled or changed with `agendar_rotina` in this reply
+  budget?: number // 'paused': the per-reply budget it reached, in counted tokens
 }
 
 export type Author = { kind: 'me' } | { kind: 'agent'; id: string } | { kind: 'system' } | { kind: 'routine'; id: string }
@@ -134,13 +135,23 @@ export interface Settings {
   approvalTtlHours: number
   theme: 'system' | 'light' | 'dark'
   openAtLogin?: boolean // so routines run without me opening the app
-  runMaxToolCalls?: number // per reply; default RUN_MAX_TOOL_CALLS
-  runMaxMinutes?: number // per reply; default RUN_MAX_MINUTES
+  runBudgetPct?: number // per reply, % of the agent's monthly limit before it pauses; default RUN_BUDGET_PCT
+  runStallMinutes?: number // without any sign of life; default RUN_STALL_MINUTES
 }
 
-// Per reply, so nothing runs away unattended (a routine at 3 a.m.). Configurable in Settings.
-export const RUN_MAX_TOOL_CALLS = 50
-export const RUN_MAX_MINUTES = 15
+// Guards per reply (spec §3), so nothing runs away unattended (a routine at 3 a.m.)
+// without cutting long work that is going somewhere.
+export const RUN_BUDGET_PCT = 10 // past this share of the month, the reply pauses and asks to continue
+export const RUN_STALL_MINUTES = 20 // no text, no tokens, no tool finishing: stuck
+export const REPEAT_WARN = 3 // the same call with the same result: the agent is told to change course
+export const REPEAT_STOP = 5 // ...and then the reply stops
+export const ERRORS_STOP = 8 // tool calls failing in a row
+
+// What a reply counts against limits: a token read from the cache costs about a
+// tenth of a new one, so it counts a tenth.
+export const CACHE_READ_WEIGHT = 0.1
+export const countedTokens = (u: { inputTokens: number; cacheReadTokens: number; outputTokens: number }): number =>
+  Math.round(u.inputTokens - u.cacheReadTokens * (1 - CACHE_READ_WEIGHT) + u.outputTokens)
 
 export const ENGINES: Record<EngineId, { label: string; cli: string; login: string }> = {
   claude: { label: 'Claude Code', cli: 'claude', login: 'claude auth login' },

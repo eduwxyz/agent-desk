@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import type { Parser } from '../src/core/engines/cli'
-import { claudeArgs, claudeParser } from '../src/core/engines/claude'
+import { claudeArgs, claudeInput, claudeParser } from '../src/core/engines/claude'
 import { CODEX_DISABLED_FEATURES, codexArgs, codexEnv, codexParser } from '../src/core/engines/codex'
 import type { EngineEvent } from '../src/core/engines/types'
 
@@ -72,6 +72,20 @@ describe('Claude Code stream', () => {
     expect(args[args.indexOf('--setting-sources') + 1]).toBe('')
     expect(args[args.indexOf('--system-prompt') + 1]).toBe('x')
     expect(args).not.toContain('--bare')
+  })
+
+  it('sends the conversation as one text block per message, so the next turn reads them from the cache', () => {
+    const turn = { model: 'sonnet', effort: 'low' as const, system: 'x', prompt: 'a\n\nb', blocks: ['a', ' ', 'b'] }
+    expect(claudeArgs(turn)).toEqual(expect.arrayContaining(['--input-format', 'stream-json']))
+    expect(JSON.parse(claudeInput(turn))).toEqual({ type: 'user', message: { role: 'user', content: [{ type: 'text', text: 'a' }, { type: 'text', text: 'b' }] } })
+    expect(claudeArgs({ ...turn, blocks: undefined })).not.toContain('--input-format')
+    expect(claudeInput({ prompt: 'só texto' })).toBe('só texto')
+  })
+
+  it('reports how much of the running total came from the cache', () => {
+    const start = (u: object): string => JSON.stringify({ type: 'stream_event', event: { type: 'message_start', message: { usage: u } } })
+    const progress = feed(claudeParser(), [start({ input_tokens: 10, cache_read_input_tokens: 900, cache_creation_input_tokens: 90 }), start({ input_tokens: 5, cache_read_input_tokens: 1000 })]).filter((e) => e.type === 'progress')
+    expect(progress.at(-1)).toEqual({ type: 'progress', tokens: 2005, cacheRead: 1900 })
   })
 
   it('with web, gets only the web tools, pre-allowed, and reports each search and page read', () => {

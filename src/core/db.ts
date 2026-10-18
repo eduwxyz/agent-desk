@@ -1,5 +1,5 @@
 import { DatabaseSync } from 'node:sqlite'
-import type { Agent, AgentColor, Approval, ApprovalState, Artifact, ArtifactKind, Author, Connector, ConnectorAuth, ConnectorTool, Conversation, Effort, LentFolder, Memory, MemoryMode, MemoryState, Message, Project, Receipt, Routine, RoutineRun, Run, Settings, ToolClass } from '../shared/types'
+import { CACHE_READ_WEIGHT, type Agent, type AgentColor, type Approval, type ApprovalState, type Artifact, type ArtifactKind, type Author, type Connector, type ConnectorAuth, type ConnectorTool, type Conversation, type Effort, type LentFolder, type Memory, type MemoryMode, type MemoryState, type Message, type Project, type Receipt, type Routine, type RoutineRun, type Run, type Settings, type ToolClass } from '../shared/types'
 
 // Each entry runs once, in order; PRAGMA user_version records how far we got.
 const MIGRATIONS = [
@@ -180,6 +180,9 @@ const MIGRATIONS = [
 ]
 
 type Row = Record<string, unknown>
+
+// countedTokens, in SQL: cache reads count CACHE_READ_WEIGHT.
+const COUNTED = `input_tokens - cache_read_tokens * ${1 - CACHE_READ_WEIGHT} + output_tokens`
 const str = (v: unknown): string => (typeof v === 'string' ? v : '')
 
 export const monthStart = (now = new Date()): number => new Date(now.getFullYear(), now.getMonth(), 1).getTime()
@@ -292,7 +295,7 @@ export class Db {
 
   usedThisMonth(agentId: string): number {
     const r = this.db
-      .prepare('SELECT COALESCE(SUM(input_tokens + output_tokens), 0) AS used FROM receipts WHERE agent_id = ? AND at >= ?')
+      .prepare(`SELECT COALESCE(ROUND(SUM(${COUNTED})), 0) AS used FROM receipts WHERE agent_id = ? AND at >= ?`)
       .get(agentId, monthStart()) as { used: number }
     return r.used
   }
@@ -592,7 +595,7 @@ export class Db {
 
   receiptTotals(messageId: string): { tokens: number } {
     return this.db
-      .prepare('SELECT COALESCE(SUM(input_tokens + output_tokens), 0) AS tokens FROM receipts WHERE message_id = ?')
+      .prepare(`SELECT COALESCE(ROUND(SUM(${COUNTED})), 0) AS tokens FROM receipts WHERE message_id = ?`)
       .get(messageId) as { tokens: number }
   }
 

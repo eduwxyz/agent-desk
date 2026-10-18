@@ -96,7 +96,7 @@ export function codexParser(): Parser {
           cacheReadTokens: num(u['cached_input_tokens']),
           outputTokens: num(u['output_tokens'])
         }
-        out.push({ type: 'progress', tokens: usage.inputTokens + usage.outputTokens })
+        out.push({ type: 'progress', tokens: usage.inputTokens + usage.outputTokens, cacheRead: usage.cacheReadTokens })
         out.push({ type: 'done', text, usage })
       } else if (type === 'turn.failed' || type === 'error') {
         finished = true

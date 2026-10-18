@@ -3,7 +3,7 @@ import { basename, join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import type { CoreEvent } from '../shared/rpc'
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
-import { describeSchedule, ENGINES, modelInfo, RUN_MAX_MINUTES, RUN_MAX_TOOL_CALLS, type Agent, type Approval, type Connector, type ConnectorTool, type Conversation, type EngineId, type Message, type Receipt, type Routine, type Run, type RunStatus, type Settings, type Step } from '../shared/types'
+import { CACHE_READ_WEIGHT, describeSchedule, ENGINES, ERRORS_STOP, modelInfo, REPEAT_STOP, REPEAT_WARN, RUN_BUDGET_PCT, RUN_STALL_MINUTES, type Agent, type Approval, type Connector, type ConnectorTool, type Conversation, type EngineId, type Message, type Receipt, type Routine, type Run, type RunStatus, type Settings, type Step } from '../shared/types'
 import { HISTORY_LIMIT, mentioned, systemPrompt, transcript } from './context'
 import { LEMBRAR, type Memories } from './memory'
 import { COMPUTER_TOOL_NAMES, COMPUTER_TOOLS, stepFor, type Computers } from './computer'
@@ -23,7 +23,8 @@ const DELTA_FLUSH_MS = 40
 const RETRYABLE: RunStatus[] = ['failed', 'stopped', 'interrupted', 'limit_reached']
 const MAX_RESULT_CHARS = 60_000 // per tool result handed back to the model
 const REASON_PARAM = '_motivo'
-const OVER_CALLS_GRACE = 3 // refused calls tolerated after the cap before the turn is cut
+const OVER_CALLS_GRACE = 3 // calls refused past the budget before the turn is cut
+const BUDGET_OVERRUN = 1.3 // past the budget by this much without wrapping up, the turn is cut
 const USAGE_ALERT = 0.8
 
 export const ASK_USER: ToolDef = {
@@ -86,7 +87,7 @@ const clip = (r: CallToolResult): CallToolResult => {
   return { ...r, content: [...images, { type: 'text', text: resultText(rest) }] }
 }
 
-type Control = { ctl: AbortController; reason?: 'stopped' | 'limit' | 'tools' | 'timeout' }
+type Control = { ctl: AbortController; reason?: 'stopped' | 'limit' | 'budget' | 'loop' | 'errors' | 'stall' }
 
 export class Runner {
   private queue: (() => Promise<unknown>)[] = []
@@ -150,6 +151,31 @@ export class Runner {
     const conv = db.conversation(msg.conversationId)
     if (!agent || !conv) return
     this.enqueue(() => this.execute(agent, conv, { depth: msg.run!.depth ?? 1, existing: msg }))
+  }
+
+  // A reply paused at its budget goes on in a new reply that knows what it did:
+  // its text is in the transcript, and its steps go in the task.
+  async continue(messageId: string): Promise<void> {
+    const { db } = this.deps
+    const msg = db.message(messageId)
+    if (msg?.run?.status !== 'paused' || msg.author.kind !== 'agent') return
+    const agent = db.agent(msg.author.id)
+    const conv = db.conversation(msg.conversationId)
+    if (!agent || !conv) return
+    const me = (await this.deps.settings()).workspaceName
+    this.update(msg, { run: { ...msg.run, status: 'done' } })
+    const steps = msg.run.steps
+      .filter((s) => s.status !== 'running' && !['Pensou', 'Pausou'].includes(s.label))
+      .slice(-40)
+      .map((s) => `- ${s.label}${s.detail ? `: ${s.detail.replace(/\s+/g, ' ').slice(0, 200)}` : ''}${s.status === 'error' ? ' (deu erro)' : ''}`)
+    const task = [
+      `Você pausou a sua última resposta ao chegar no teto de gasto dela, e ${me} pediu pra continuar. O que você escreveu está na sua última mensagem acima.`,
+      steps.length ? `Os passos que você fez:\n${steps.join('\n')}` : '',
+      'Continue de onde parou, sem refazer o que já está feito, e termine com o resultado.'
+    ]
+      .filter(Boolean)
+      .join('\n\n')
+    this.enqueue(() => this.execute(agent, conv, { depth: msg.run!.depth ?? 1, task }))
   }
 
   // Posts a routine's request in its conversation and runs its agent on it.
@@ -354,14 +380,35 @@ export class Runner {
     const routines = this.deps.gateway ? this.deps.routines : undefined
 
     const control: Control = { ctl: new AbortController() }
-    const maxCalls = settings.runMaxToolCalls ?? RUN_MAX_TOOL_CALLS
-    const maxMinutes = settings.runMaxMinutes ?? RUN_MAX_MINUTES
-    let calls = 0
-    const deadline = setTimeout(() => {
-      control.reason ??= 'timeout'
-      control.ctl.abort()
-    }, maxMinutes * 60_000)
     this.controllers.set(msg.id, control)
+    const halt = (reason: NonNullable<Control['reason']>): void => {
+      if (control.reason) return
+      control.reason = reason
+      control.ctl.abort()
+    }
+
+    // Guards (spec §3). Long work that keeps going somewhere is never cut: a loop
+    // repeats itself, a stuck turn goes quiet, and a costly one pauses to ask.
+    const budget = Math.round((agent.limit * (settings.runBudgetPct ?? RUN_BUDGET_PCT)) / 100)
+    const stallMs = (settings.runStallMinutes ?? RUN_STALL_MINUTES) * 60_000
+    const seen = new Map<string, { result: string; n: number }>()
+    let failing = 0 // tool calls failing in a row
+    let inFlight = 0 // a tool running has its own timeout, so it isn't silence
+    let lastSign = Date.now()
+    let overBudget = false
+    let refusedOver = 0
+    const sign = (): void => {
+      lastSign = Date.now()
+    }
+    const stall = setInterval(() => inFlight === 0 && Date.now() - lastSign > stallMs && halt('stall'), Math.min(15_000, Math.max(20, stallMs / 4)))
+    stall.unref()
+    // How many times in a row this call gave this same result.
+    const repeated = (key: string, result: string): number => {
+      const prev = seen.get(key)
+      const n = prev && prev.result === result ? prev.n + 1 : 1
+      seen.set(key, { result, n })
+      return n
+    }
 
     let pending = ''
     let timer: NodeJS.Timeout | null = null
@@ -414,17 +461,7 @@ export class Runner {
       save()
     }
 
-    const session = this.deps.gateway?.open({
-      tools: toolDefs,
-      call: async (name, args) => {
-        if (++calls > maxCalls) {
-          if (calls === maxCalls + 1) addSteps({ id: randomUUID(), label: 'Chegou no limite de ferramentas', detail: `${maxCalls} por resposta`, status: 'error' })
-          if (calls > maxCalls + OVER_CALLS_GRACE && !control.reason) {
-            control.reason = 'tools'
-            control.ctl.abort()
-          }
-          return textResult(`Você chegou no limite de ${maxCalls} chamadas de ferramenta nesta resposta. Não chame mais nenhuma: encerre agora dizendo o que fez e o que falta.`, true)
-        }
+    const runTool = async (name: string, args: Record<string, unknown>): Promise<CallToolResult> => {
         if (name === ASK_USER.name) {
           const q = typeof args['question'] === 'string' ? args['question'].trim() : ''
           if (!q) return textResult('Faltou a pergunta.', true)
@@ -533,13 +570,45 @@ export class Runner {
           return textResult(`A ferramenta falhou: ${e instanceof Error ? e.message : String(e)}`, true)
         }
       }
+
+    const session = this.deps.gateway?.open({
+      tools: toolDefs,
+      call: async (name, args) => {
+        if (overBudget) {
+          if (++refusedOver > OVER_CALLS_GRACE) halt('budget')
+          return textResult(
+            `Você chegou no teto de gasto desta resposta (${tokenCount(budget)} tokens). Não chame mais ferramentas: escreva em poucas linhas o que já fez, o que descobriu e o que falta, e encerre. Se ${settings.workspaceName} mandar continuar, você segue de onde parou.`,
+            true
+          )
+        }
+        inFlight++
+        sign()
+        try {
+          const r = await runTool(name, args)
+          const { [REASON_PARAM]: _why, ...callArgs } = args
+          const n = repeated(`${name} ${canonical(callArgs)}`, resultText(r))
+          failing = r.isError ? failing + 1 : 0
+          if (n >= REPEAT_STOP) halt('loop')
+          else if (failing >= ERRORS_STOP) halt('errors')
+          else if (n === REPEAT_WARN) {
+            addSteps({ id: randomUUID(), label: 'Repetiu a mesma chamada', detail: `${n}× com o mesmo resultado`, status: 'error' })
+            const warning = `Atenção: esta chamada deu exatamente o mesmo resultado ${n} vezes nesta resposta. Repetir não vai mudar nada: mude de abordagem, ou encerre dizendo onde travou.`
+            return { ...r, content: [...r.content, { type: 'text', text: warning }] }
+          }
+          return r
+        } finally {
+          inFlight--
+          sign()
+        }
+      }
     })
 
     const promptMemories = memory?.forPrompt(agent, conv)
-    let turnTokens = 0
+    let progress = { tokens: 0, cacheRead: 0 }
     let result: { text: string; usage: Omit<Receipt, 'model' | 'ms'> } | null = null
     let error: string | null = null
 
+    const blocks = transcript({ agent, conversation: conv, messages: history, agents: db.agents(), me: settings.workspaceName, task: opts.task, summary })
     try {
       const events = engines[engineId].run({
         model: agent.modelId,
@@ -556,30 +625,32 @@ export class Runner {
           routines: routines?.forAgent(agent.id),
           project: conv.project && { files: readContext(conv.project), memories: promptMemories?.project ?? [] }
         }),
-        prompt: transcript({ agent, conversation: conv, messages: history, agents: db.agents(), me: settings.workspaceName, task: opts.task, summary }),
+        prompt: blocks.join('\n\n'),
+        blocks,
         cwd,
         signal: control.ctl.signal,
         mcpUrl: session?.url,
         web: agent.web !== false
       })
       for await (const ev of events) {
+        sign()
         if (ev.type === 'text') {
           msg.text += ev.delta
           pending += ev.delta
           timer ??= setTimeout(flush, DELTA_FLUSH_MS)
         } else if (ev.type === 'progress') {
-          turnTokens = ev.tokens
-          if (used + turnTokens > agent.limit && !control.reason) {
-            control.reason = 'limit'
-            control.ctl.abort()
+          progress = { tokens: ev.tokens, cacheRead: ev.cacheRead ?? 0 }
+          const counted = Math.round(ev.tokens - progress.cacheRead * (1 - CACHE_READ_WEIGHT))
+          if (used + counted > agent.limit) halt('limit')
+          else if (counted > budget) {
+            if (!overBudget) addSteps({ id: randomUUID(), label: 'Chegou no teto da resposta', detail: `${tokenCount(budget)} tokens`, status: 'error' })
+            overBudget = true
+            if (counted > budget * BUDGET_OVERRUN) halt('budget')
           }
         } else if (ev.type === 'web') {
-          // Not through the gateway, so it can't be refused: it counts, and past the grace the turn is cut.
+          // Not through the gateway, so it can't be refused or warned: the same search over and over is a loop.
           addSteps({ id: randomUUID(), label: ev.action === 'search' ? 'Pesquisou na web' : 'Leu uma página', detail: ev.detail, status: 'done' })
-          if (++calls > maxCalls + OVER_CALLS_GRACE && !control.reason) {
-            control.reason = 'tools'
-            control.ctl.abort()
-          }
+          if (repeated(`web ${ev.action} ${ev.detail}`, '') >= REPEAT_STOP) halt('loop')
         } else if (ev.type === 'done') {
           result = ev
         } else if (ev.type === 'error') {
@@ -589,7 +660,7 @@ export class Runner {
     } catch (e) {
       error = e instanceof Error ? e.message : String(e)
     } finally {
-      clearTimeout(deadline)
+      clearInterval(stall)
       flush()
       session?.close()
       this.controllers.delete(msg.id)
@@ -598,8 +669,8 @@ export class Runner {
     const ms = Date.now() - started
     const receipt: Receipt | undefined = result
       ? { model: agent.modelId, ms, ...result.usage }
-      : turnTokens > 0
-        ? { model: agent.modelId, ms, inputTokens: turnTokens, cacheReadTokens: 0, outputTokens: 0 } // partial: what the stream reported before it ended
+      : progress.tokens > 0
+        ? { model: agent.modelId, ms, inputTokens: progress.tokens, cacheReadTokens: progress.cacheRead, outputTokens: 0 } // partial: what the stream reported before it ended
         : undefined
     if (receipt) db.addReceipt({ ...receipt, messageId: msg.id, agentId: agent.id, engine: engineId, at: Date.now() })
     const usedNow = db.usedThisMonth(agent.id)
@@ -612,11 +683,21 @@ export class Runner {
     const base = { depth: opts.depth, receipt, question, approvalId: approval?.id, memoryIds: memoryIds.length ? memoryIds : undefined, artifactIds: artifactIds.length ? artifactIds : undefined, services: services.length ? services : undefined, routineIds: routineIds.length ? routineIds : undefined }
     if (control.reason === 'stopped') {
       save({ run: { ...base, status: 'stopped', steps: closeThinking('error', 'Parado') } })
-    } else if (control.reason === 'tools' || control.reason === 'timeout') {
-      const why = control.reason === 'tools' ? `passei de ${maxCalls} chamadas de ferramenta` : `passei de ${maxMinutes} minutos`
+    } else if (control.reason === 'loop' || control.reason === 'errors' || control.reason === 'stall') {
+      const why = {
+        loop: `repeti a mesma coisa, com o mesmo resultado, ${REPEAT_STOP} vezes. Parecia um loop`,
+        errors: `${ERRORS_STOP} ferramentas falharam seguidas`,
+        stall: `fiquei ${Math.round(stallMs / 60_000)} minutos sem nenhum sinal, travado`
+      }[control.reason]
       save({
         text: msg.text ? `${msg.text} …` : '',
-        run: { ...base, status: 'failed', steps: closeThinking('error', 'Parou no limite da resposta'), error: `Parei: ${why} nesta resposta. O limite fica em Configurações.` }
+        run: { ...base, status: 'failed', steps: closeThinking('error', 'Parou'), error: `Parei: ${why}.` }
+      })
+    } else if (overBudget && control.reason !== 'limit') {
+      // Wrapped up at the budget, or cut past it: either way it can go on from here.
+      save({
+        text: msg.text.trim() ? msg.text : (result?.text ?? ''),
+        run: { ...base, status: 'paused', budget, steps: closeThinking('done', 'Pausou') }
       })
     } else if (control.reason === 'limit') {
       save({
