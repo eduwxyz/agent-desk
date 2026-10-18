@@ -133,6 +133,18 @@ describe('routines', () => {
     expect(db.routine(r.id)!.nextAt).toBe(at(2026, 10, 21, 9, 0))
   })
 
+  it("waits while the Mac sleeps, even through its short maintenance wakes, and runs late on a real wake", async () => {
+    create()
+    routines.setAwake(false) // went to sleep at 8:50
+    clock = at(2026, 10, 19, 9, 20) // a DarkWake: timers run for a few seconds
+    routines.tick()
+    await settle()
+    expect(posted()).toHaveLength(0)
+    routines.setAwake(true) // opened the lid at 9:20
+    await settle()
+    expect(posted().find((m) => m.author.kind === 'routine')?.routine).toMatchObject({ late: true })
+  })
+
   it('off means off, and turning it back on schedules from now', async () => {
     const r = create({ enabled: false })
     expect(r.nextAt).toBeUndefined()

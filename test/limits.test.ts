@@ -231,6 +231,18 @@ describe('web', () => {
   })
 })
 
+describe('keeping the Mac awake', () => {
+  it('says when replies start and when the last one ends', async () => {
+    const busy: boolean[] = []
+    const r = new Runner({ db, engines: { claude: fakeEngine('claude', { delayMs: 5 }), codex: fakeEngine('codex') }, settings: async () => settings, emit: () => {}, workDir: mkdtempSync(join(tmpdir(), 'ad-w-')), onBusy: (b) => busy.push(b) })
+    db.saveAgent(agent({ id: 'a2', handle: 'theo', name: 'Theo' }))
+    db.createConversation({ id: 'c1', kind: 'channel', name: 'eng', members: ['a1', 'a2'] })
+    await r.send('c1', '@lia @theo oi')
+    await r.idle()
+    expect(busy).toEqual([true, false])
+  })
+})
+
 describe('usage alert', () => {
   it('warns once, in the conversation and with a notification, when an agent crosses 80% of its limit', async () => {
     db.saveAgent(agent({ limit: 10_000 }))

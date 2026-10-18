@@ -19,8 +19,10 @@ export async function* runCli(opts: {
   env?: NodeJS.ProcessEnv
 }): AsyncIterable<EngineEvent> {
   const child = spawn(opts.bin, opts.args, { cwd: opts.cwd, stdio: ['pipe', 'pipe', 'pipe'], env: opts.env ?? process.env })
+  // A CLI that ignores SIGTERM (stuck on the network, say) gets SIGKILL, so a stop always ends the turn.
   const kill = (): void => {
     child.kill('SIGTERM')
+    setTimeout(() => child.exitCode === null && child.signalCode === null && child.kill('SIGKILL'), 5_000).unref()
   }
   opts.signal.addEventListener('abort', kill, { once: true })
 

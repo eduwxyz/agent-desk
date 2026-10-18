@@ -80,13 +80,15 @@ type ToMain =
   | { type: 'open_path'; path: string }
   | { type: 'notify'; title: string; body: string; conversationId?: string }
   | { type: 'login_item'; open: boolean }
+  | { type: 'busy'; busy: boolean }
 const toMain = (msg: ToMain): void =>
   process.parentPort.postMessage(msg)
 
 // Screenshots use Electron's Chromium, which lives in the main process.
 const shots = new Map<string, { resolve: (b: Buffer) => void; reject: (e: Error) => void }>()
 process.parentPort.on('message', (e) => {
-  const r = e.data as { type?: string; id: string; data?: string; error?: string } | undefined
+  const r = e.data as { type?: string; id: string; data?: string; error?: string; awake?: boolean } | undefined
+  if (r?.type === 'power') return routines.setAwake(r.awake === true)
   if (r?.type !== 'screenshot-result') return
   const p = shots.get(r.id)
   shots.delete(r.id)
@@ -139,7 +141,8 @@ const runner = new Runner({
   computers,
   routines,
   notify: (title, body, conversationId) => toMain({ type: 'notify', title, body, conversationId }),
-  jev: { key: () => secrets.get(JEV_SECRET) }
+  jev: { key: () => secrets.get(JEV_SECRET) },
+  onBusy: (busy) => toMain({ type: 'busy', busy })
 })
 
 

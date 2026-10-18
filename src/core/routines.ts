@@ -61,6 +61,7 @@ export class Routines {
   private running = new Set<string>()
   private runs = new Set<Promise<void>>()
   private timer: NodeJS.Timeout | null = null
+  private awake = true
 
   constructor(private deps: RoutineDeps) {}
 
@@ -79,8 +80,16 @@ export class Routines {
     this.timer = null
   }
 
+  // Between the Mac going to sleep and really waking up, nothing is due: the
+  // wake catches up, with what was missed marked late.
+  setAwake(awake: boolean): void {
+    this.awake = awake
+    if (awake) this.tick()
+  }
+
   // Runs what is due once, at most, and moves each due routine to its next time.
   tick(): void {
+    if (!this.awake) return
     const now = this.now()
     for (const r of this.deps.db.routines()) {
       if (!r.enabled || r.nextAt === undefined || r.nextAt > now) continue

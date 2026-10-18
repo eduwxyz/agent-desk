@@ -50,6 +50,7 @@ export interface RunnerDeps {
   routines?: Pick<Routines, 'schedule' | 'cancel' | 'forAgent'> // without it, agents can't schedule
   notify?: (title: string, body: string, conversationId?: string) => void
   jev?: { key(): Promise<string | undefined>; fetch?: typeof fetch } // the TypeSafe router, when chosen in settings
+  onBusy?: (busy: boolean) => void // some reply is running (the Mac shouldn't sleep) or none is
 }
 
 // What the runner needs from the connector manager.
@@ -309,12 +310,13 @@ export class Runner {
   private pump(): void {
     while (this.active < MAX_CONCURRENT && this.queue.length > 0) {
       const job = this.queue.shift()!
-      this.active++
+      if (this.active++ === 0) this.deps.onBusy?.(true)
       void job()
         .catch((e: unknown) => console.error('[runner]', e))
         .finally(() => {
           this.active--
           this.pump()
+          if (this.active === 0) this.deps.onBusy?.(false)
           this.checkIdle()
         })
     }
@@ -400,7 +402,14 @@ export class Runner {
     const sign = (): void => {
       lastSign = Date.now()
     }
-    const stall = setInterval(() => inFlight === 0 && Date.now() - lastSign > stallMs && halt('stall'), Math.min(15_000, Math.max(20, stallMs / 4)))
+    const every = Math.min(15_000, Math.max(20, stallMs / 4))
+    let lastCheck = Date.now()
+    const stall = setInterval(() => {
+      const now = Date.now()
+      if (now - lastCheck > every * 4 + 30_000) lastSign = now // the Mac slept: that wasn't the agent going quiet
+      lastCheck = now
+      if (inFlight === 0 && now - lastSign > stallMs) halt('stall')
+    }, every)
     stall.unref()
     // How many times in a row this call gave this same result.
     const repeated = (key: string, result: string): number => {

@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, MessageChannelMain, net, Notification, protocol, safeStorage, shell, utilityProcess, type UtilityProcess } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, MessageChannelMain, net, Notification, powerMonitor, powerSaveBlocker, protocol, safeStorage, shell, utilityProcess, type UtilityProcess } from 'electron'
 import { join, normalize, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
@@ -30,7 +30,11 @@ type CoreRequest =
   | { type: 'open_path'; path: string }
   | { type: 'notify'; title: string; body: string; conversationId?: string }
   | { type: 'login_item'; open: boolean }
+  | { type: 'busy'; busy: boolean }
   | { type: 'screenshot'; id: string; url: string; width: number; height: number; fullPage: boolean }
+
+// While an agent is replying, the Mac doesn't go to sleep on its own (closing the lid still does).
+let awakeBlocker: number | null = null
 
 // Things the core can't do itself: the OS keychain, the browser, notifications.
 function handleCore(child: UtilityProcess, msg: CoreRequest): void {
@@ -53,6 +57,12 @@ function handleCore(child: UtilityProcess, msg: CoreRequest): void {
     const n = new Notification({ title: msg.title, body: msg.body })
     n.on('click', () => showWindow(msg.conversationId))
     n.show()
+  } else if (msg.type === 'busy') {
+    if (msg.busy && awakeBlocker === null) awakeBlocker = powerSaveBlocker.start('prevent-app-suspension')
+    else if (!msg.busy && awakeBlocker !== null) {
+      powerSaveBlocker.stop(awakeBlocker)
+      awakeBlocker = null
+    }
   } else if (msg.type === 'login_item') {
     // Only the installed app: in dev this would register the bare Electron binary.
     if (app.isPackaged) app.setLoginItemSettings({ openAtLogin: msg.open })
@@ -184,6 +194,10 @@ app.on('second-instance', () => showWindow())
 if (primary) app.whenReady().then(() => {
   protocol.handle('agentdesk', serveArtifact)
   core = startCore()
+  // The Mac wakes for a few seconds at a time while asleep (maintenance, "DarkWake"):
+  // routines wait for a real wake, so a run doesn't start and freeze mid-way.
+  powerMonitor.on('suspend', () => core?.postMessage({ type: 'power', awake: false }))
+  powerMonitor.on('resume', () => core?.postMessage({ type: 'power', awake: true }))
   createWindow()
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
