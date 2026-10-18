@@ -19,16 +19,19 @@ export const ROUTER_SYSTEM = [
 
 const GRANT_LABEL = { read: 'só leitura', read_write: 'leitura e escrita' } as const
 
+// "Lia, Engenharia: Ajuda com código. · acessa: Linear (só leitura)"
+export function describeAgent(a: Agent, connectors: Connector[] = []): string {
+  const about = a.instructions.split('\n')[0]?.slice(0, 140)
+  const access = connectors.flatMap((c) => {
+    const g = a.grants[c.id]
+    return g === 'read' || g === 'read_write' ? [`${c.name} (${GRANT_LABEL[g]})`] : []
+  })
+  return `${a.name}${a.role ? `, ${a.role}` : ''}${about ? `: ${about}` : ''} · acessa: ${access.join(', ') || 'nenhum sistema externo'}`
+}
+
 export function routerPrompt(opts: { messages: Message[]; agents: Agent[]; me: string; connectors?: Connector[]; project?: string }): string {
   const { messages, agents, me, connectors = [], project } = opts
-  const roster = agents.map((a) => {
-    const about = a.instructions.split('\n')[0]?.slice(0, 140)
-    const access = connectors.flatMap((c) => {
-      const g = a.grants[c.id]
-      return g === 'read' || g === 'read_write' ? [`${c.name} (${GRANT_LABEL[g]})`] : []
-    })
-    return `- ${a.handle} (${a.name}${a.role ? `, ${a.role}` : ''})${about ? `: ${about}` : ''} · acessa: ${access.join(', ') || 'nenhum sistema externo'}`
-  })
+  const roster = agents.map((a) => `- ${a.handle}: ${describeAgent(a, connectors)}`)
   const lines = messages
     .filter((m) => m.text.trim() && m.author.kind !== 'system')
     .slice(-ROUTER_HISTORY)

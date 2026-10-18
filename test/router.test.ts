@@ -52,7 +52,7 @@ describe('routerPrompt', () => {
       { id: 'm3', conversationId: 'c', author: { kind: 'agent', id: 'a1' }, text: 'olhando', at: 3 }
     ]
     const p = routerPrompt({ messages, agents: team, me: 'Edu' })
-    expect(p).toContain('- lia (Lia, Engenharia): Ajuda com código e bugs.')
+    expect(p).toContain('- lia: Lia, Engenharia: Ajuda com código e bugs.')
     expect(p).not.toContain('Segunda linha')
     expect(p).toContain('[Edu] o build quebrou')
     expect(p).toContain('[Lia] olhando')
@@ -64,7 +64,7 @@ describe('routerPrompt', () => {
     const demo = { id: 'k2', name: 'Demo' } as Connector
     const withAccess = { ...lia, grants: { k1: 'read', k2: 'read_write' } } as Agent
     const p = routerPrompt({ messages: [], agents: [withAccess, { ...nina, grants: { k1: 'none' } }], me: 'Edu', connectors: [linear, demo] })
-    expect(p).toContain('- lia (Lia, Engenharia): Ajuda com código e bugs. · acessa: Linear (só leitura), Demo (leitura e escrita)')
-    expect(p).toContain('- nina (Nina, Conteúdo) · acessa: nenhum sistema externo')
+    expect(p).toContain('- lia: Lia, Engenharia: Ajuda com código e bugs. · acessa: Linear (só leitura), Demo (leitura e escrita)')
+    expect(p).toContain('- nina: Nina, Conteúdo · acessa: nenhum sistema externo')
   })
 })

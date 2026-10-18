@@ -3,7 +3,7 @@
 // takes several. It needs the user's own TypeSafe key, and each decision sends
 // the channel's recent messages to TypeSafe, so it's off unless chosen.
 import type { Agent, Connector, Message } from '../shared/types'
-import { MAX_ROUTED, routerPrompt } from './router'
+import { describeAgent, MAX_ROUTED, routerPrompt } from './router'
 
 export const JEV_MODEL = 'jev' // the routerModel value that picks it
 export const JEV_SECRET = 'typesafe:key'
@@ -46,8 +46,8 @@ export async function routeJev(opts: {
   // The same roster and conversation the CLI router reads, as the state; the agents are the options.
   const state = routerPrompt(opts).replace(/\n*Responda só com o JSON\.$/, '')
   const criteria: Record<string, string> = {}
-  for (const a of agents) criteria[a.handle] = `${a.name}${a.role ? `, ${a.role}` : ''}${a.instructions ? `: ${a.instructions.split('\n')[0]!.slice(0, 140)}` : ''}`
-  criteria[NOBODY] = 'Ninguém precisa responder: cumprimento solto, agradecimento, recado, conversa já encerrada.'
+  for (const a of agents) criteria[a.handle] = describeAgent(a, opts.connectors)
+  criteria[NOBODY] = 'Ninguém: a mensagem não pede nada a nenhum agente (cumprimento solto, agradecimento, recado, conversa já encerrada).'
 
   let res: Response
   try {

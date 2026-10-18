@@ -91,7 +91,7 @@ const ROLE_WORDS: [RegExp, RegExp][] = [
 function fakeRoute(prompt: string): { handles: string[]; reason: string } {
   const last = lastMessage(prompt)
   if (/^(bom dia|boa tarde|boa noite|obrigad|valeu|ok)\b/i.test(last.trim())) return { handles: [], reason: 'cumprimento, ninguém precisa responder' }
-  const roster = [...prompt.matchAll(/^- ([a-z0-9_-]+) \(([^)]*)\)/gim)].map((m) => ({ handle: m[1]!, about: m[2]! }))
+  const roster = [...prompt.matchAll(/^- ([a-z0-9_-]+): ([^·\n]*)/gim)].map((m) => ({ handle: m[1]!, about: m[2]! }))
   const fit = roster.find((r) => ROLE_WORDS.some(([role, words]) => role.test(r.about) && words.test(last)))
   const pick = fit ?? roster[0]
   return pick ? { handles: [pick.handle], reason: fit ? 'assunto da área dele' : 'primeiro do canal' } : { handles: [], reason: 'sem agentes' }
