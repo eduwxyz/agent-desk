@@ -331,6 +331,7 @@ export const stopService = (agentId: string, name: string): void => void call('s
 export const openExternal = (url: string): void => void call('openExternal', { url })
 
 export const saveRoutine = (routine: RoutineInput): Promise<Routine> => call('saveRoutine', { routine })
+export const setJevKey = (key: string | null): Promise<void> => call('setJevKey', { key })
 export const removeRoutine = (id: string): void => void call('removeRoutine', { id })
 export const runRoutine = (id: string): void => void call('runRoutine', { id })
 // The id of the DM with an agent, created if it doesn't exist yet, without opening it.

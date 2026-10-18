@@ -51,6 +51,7 @@ Usuário do MVP: eu, numa máquina só. Quem baixar o repositório usa do mesmo 
 - **Mensagem num canal sem menção:** o **router** decide. Ele recebe as últimas ~10 mensagens e a lista de agentes do canal (handle + uma linha de papel) e devolve, em saída estruturada, 0 a 2 handles e um motivo curto.
 - O router só decide quem fala. Ele **não** concede permissão nem altera grants.
 - O router roda num motor e modelo pequenos, configuráveis (default: Claude Code + Haiku, com `--json-schema`). Gera recibo próprio, atribuído ao workspace.
+- **Jev (opcional):** em Configurações, o router pode ser o Jev, o modelo de decisão da TypeSafe, com a chave do usuário. A pergunta vai como uma escolha tipada entre os handles do canal e "ninguém" (com o mesmo texto que o Haiku lê como estado); um segundo agente é chamado quando ganha pelo menos 30%. Decide em menos de 1 s, contra ~17 s medidos com o Haiku. É a única exceção a "sem chave de API": cada decisão manda as últimas 10 mensagens do canal pra TypeSafe e é cobrada lá, e a tela diz isso. A chave é conferida em `/v1/models` antes de ser guardada, fica cifrada no cofre do sistema e o renderer só sabe se ela existe. Se o Jev falhar (sem chave, recusada, limite, fora do ar), o Haiku decide e a mensagem do router diz por quê.
 - Mensagens de agente **nunca** passam pelo router. Um agente pode @mencionar outro, o que dispara um run dele. A profundidade da cadeia é limitada a 3 por mensagem humana original.
 
 ### 3. Run

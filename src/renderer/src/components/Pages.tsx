@@ -21,6 +21,7 @@ import {
   removeConnector,
   updateTool,
   updateSettings,
+  setJevKey,
   useStore,
   EFFORTS,
   ENGINES,
@@ -1004,6 +1005,47 @@ export function Toggle({ on, onChange }: { on: boolean; onChange: (v: boolean) =
 
 // ---------- Settings ----------
 
+// The TypeSafe key for the Jev router: checked by the core, kept encrypted, never shown again.
+function JevKey({ saved }: { saved: boolean }): ReactNode {
+  const [key, setKey] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const save = (value: string | null): void => {
+    setBusy(true)
+    setError('')
+    setJevKey(value)
+      .then(() => setKey(''))
+      .catch((e: unknown) => setError(e instanceof Error ? e.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '') : String(e)))
+      .finally(() => setBusy(false))
+  }
+  return (
+    <>
+      <p className="hint">
+        <Icon name="shield" size={13} /> Decide em menos de 1 segundo, mas cada decisão manda as últimas 10 mensagens do canal pra TypeSafe e é cobrada na sua conta de lá (centavos por mês). Se ele falhar, o Haiku decide.
+      </p>
+      {saved ? (
+        <div className="row">
+          <span className="tag tag--ok">Chave salva</span>
+          <span className="muted small grow">Guardada no cofre do Mac.</span>
+          <button className="btn btn--sm btn--ghost" disabled={busy} onClick={() => save(null)}>
+            Remover chave
+          </button>
+        </div>
+      ) : (
+        <Field label="Chave do TypeSafe" hint="Crie em console.typesafe.ai → API Keys. O app confere antes de guardar.">
+          <div className="row">
+            <input className="grow" type="password" value={key} placeholder="Cole a chave aqui" onChange={(e) => setKey(e.target.value)} />
+            <button className="btn" disabled={busy || !key.trim()} onClick={() => save(key)}>
+              {busy ? 'Conferindo…' : 'Salvar'}
+            </button>
+          </div>
+        </Field>
+      )}
+      {error && <p className="note note--error">{error}</p>}
+    </>
+  )
+}
+
 export function SettingsPage(): ReactNode {
   const settings = useStore((s) => s.settings)
   const packaged = useStore((s) => s.packaged)
@@ -1071,8 +1113,10 @@ export function SettingsPage(): ReactNode {
                   {ENGINES[m.engine].label} · {m.label}
                 </option>
               ))}
+              <option value="jev">TypeSafe · Jev (chave própria)</option>
             </select>
           </Field>
+          {settings.routerModel === 'jev' && <JevKey saved={!!settings.jevKey} />}
         </Card>
 
         <Card title="Memória" lead="Um modelo pequeno resume o que sai da janela de cada conversa e, do mesmo trecho, tira o que vale lembrar sobre você.">

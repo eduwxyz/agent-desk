@@ -126,7 +126,8 @@ export interface Settings {
   workspaceName: string
   context: string
   engines: Record<EngineId, EngineStatus>
-  routerModel: string
+  routerModel: string // a model id, or 'jev' for TypeSafe's Jev (falls back to Haiku)
+  jevKey?: boolean // a TypeSafe key is saved (the key itself never leaves the core)
   memoryModel: string // summarizes conversations and extracts memories
   memoryLearning: 'approve' | 'auto' | 'off' // what extracted memories about me become
   defaultLimit: number

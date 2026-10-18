@@ -12,6 +12,7 @@ import { readContext } from './projects'
 import type { Db } from './db'
 import type { Engine } from './engines/types'
 import { textResult, type Gateway, type ToolDef } from './gateway'
+import { JEV_MODEL, routeJev } from './jev'
 import { route } from './router'
 import { allowed, approvalHash, canonical } from './policy'
 
@@ -47,6 +48,7 @@ export interface RunnerDeps {
   computers?: Pick<Computers, 'call'> // without it, no agent has a computer
   routines?: Pick<Routines, 'schedule' | 'cancel' | 'forAgent'> // without it, agents can't schedule
   notify?: (title: string, body: string, conversationId?: string) => void
+  jev?: { key(): Promise<string | undefined>; fetch?: typeof fetch } // the TypeSafe router, when chosen in settings
 }
 
 // What the runner needs from the connector manager.
@@ -231,26 +233,46 @@ export class Runner {
       this.update(note, { text: `Não consegui escolher quem responde (${why}). Mencione um agente com **@nome**.`, run: undefined })
     try {
       const settings = await this.deps.settings()
+      const input = {
+        messages: db.recentMessages(conv.id, 20),
+        agents: members,
+        me: settings.workspaceName,
+        connectors: this.deps.connectors?.list(),
+        project: conv.project && `${basename(conv.project.folder)}${conv.project.brief ? ` (${conv.project.brief.replace(/\s+/g, ' ').slice(0, 300)})` : ''}`
+      }
+
+      // Jev first when chosen; if it fails, Haiku decides, so the channel never goes quiet.
+      let fellBack = ''
+      if (settings.routerModel === JEV_MODEL) {
+        const key = await this.deps.jev?.key()
+        const j = key ? await routeJev({ ...input, key, fetch: this.deps.jev?.fetch }) : { error: 'falta a chave do TypeSafe' }
+        if (!('error' in j)) return this.routed(conv, note, j.agents, `${j.reason}, ${(j.ms / 1000).toFixed(1).replace('.', ',')} s`)
+        fellBack = ` · o Jev falhou (${j.error}), o Haiku decidiu`
+      }
+
       const model = modelInfo(settings.routerModel) ?? modelInfo('haiku')!
       const status = settings.engines[model.engine]
       if (!status.installed || !status.loggedIn) return fail(`o ${ENGINES[model.engine].label} não está pronto`)
 
       const cwd = join(this.deps.workDir, '_router')
       mkdirSync(cwd, { recursive: true })
-      const r = await route({ engine: engines[model.engine], model: model.id, messages: db.recentMessages(conv.id, 20), agents: members, me: settings.workspaceName, connectors: this.deps.connectors?.list(), project: conv.project && `${basename(conv.project.folder)}${conv.project.brief ? ` (${conv.project.brief.replace(/\s+/g, ' ').slice(0, 300)})` : ''}`, cwd })
+      const r = await route({ ...input, engine: engines[model.engine], model: model.id, cwd })
       if (r.usage) db.addReceipt({ ...r.usage, model: model.id, ms: r.ms, messageId: note.id, agentId: 'router', engine: model.engine, at: Date.now() })
       if ('error' in r) return fail(r.error)
-
-      const why = r.reason ? ` · ${r.reason}` : ''
-      if (r.agents.length === 0) return this.update(note, { text: `Ninguém precisa responder${why}`, run: undefined })
-      this.update(note, { text: `Chamei ${r.agents.map((a) => `**${a.name}**`).join(' e ')}${why}`, run: undefined })
-      for (const agent of r.agents) this.enqueue(() => this.execute(agent, conv, { depth: 1 }))
+      this.routed(conv, note, r.agents, `${r.reason}${fellBack}`)
     } catch (e) {
       fail(e instanceof Error ? e.message : String(e))
     } finally {
       this.routing--
       this.checkIdle()
     }
+  }
+
+  private routed(conv: Conversation, note: Message, agents: Agent[], reason: string): void {
+    const why = reason ? ` · ${reason}` : ''
+    if (agents.length === 0) return void this.update(note, { text: `Ninguém precisa responder${why}`, run: undefined })
+    this.update(note, { text: `Chamei ${agents.map((a) => `**${a.name}**`).join(' e ')}${why}`, run: undefined })
+    for (const agent of agents) this.enqueue(() => this.execute(agent, conv, { depth: 1 }))
   }
 
   private enqueue(job: () => Promise<unknown>): void {

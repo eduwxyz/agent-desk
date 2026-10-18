@@ -48,6 +48,7 @@ export interface Api {
   folderAction(p: { agentId: string; name: string; action: 'read_only' | 'read_write' | 'return' }): void
   openExternal(p: { url: string }): void
   saveRoutine(p: { routine: RoutineInput }): Routine // throws a message for the form
+  setJevKey(p: { key: string | null }): Promise<void> // checks the key with TypeSafe; throws why it's refused
   removeRoutine(p: { id: string }): void
   runRoutine(p: { id: string }): void
 }

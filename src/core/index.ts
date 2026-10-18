@@ -17,6 +17,7 @@ import { fakeEngine } from './engines/fake'
 import type { Engine } from './engines/types'
 import { ConnectorManager } from './connectors'
 import { Gateway } from './gateway'
+import { checkJevKey, JEV_MODEL, JEV_SECRET } from './jev'
 import { mainCipher, plainCipher, Secrets } from './secrets'
 import { checkFolder, Computers, folderName, type Shooter } from './computer'
 import { Memories } from './memory'
@@ -59,7 +60,7 @@ async function detect(): Promise<void> {
 const gateway = new Gateway()
 const ready = Promise.all([gateway.start(), (fake ? Promise.resolve() : adoptLoginShellPath()).then(detect)])
 
-const settings = (): Settings => ({ ...db.getSettings(DEFAULTS), engines })
+const settings = (): Settings => ({ ...db.getSettings(DEFAULTS), engines, jevKey: db.getSecret(JEV_SECRET) !== undefined })
 
 const engineImpls: Record<EngineId, Engine> = fake
   ? { claude: fakeEngine('claude'), codex: fakeEngine('codex') }
@@ -137,7 +138,8 @@ const runner = new Runner({
   memory,
   computers,
   routines,
-  notify: (title, body, conversationId) => toMain({ type: 'notify', title, body, conversationId })
+  notify: (title, body, conversationId) => toMain({ type: 'notify', title, body, conversationId }),
+  jev: { key: () => secrets.get(JEV_SECRET) }
 })
 
 
@@ -226,7 +228,16 @@ const api: Api = {
     return id
   },
 
-  updateSettings: ({ patch }) => {
+  // Checked with TypeSafe before it's saved; null removes it.
+  setJevKey: async ({ key }) => {
+    const k = key?.trim()
+    if (k) await checkJevKey(k)
+    await secrets.set(JEV_SECRET, k || undefined)
+    if (!k && settings().routerModel === JEV_MODEL) db.setSettings({ routerModel: 'haiku' })
+    emit({ type: 'settings', settings: settings() })
+  },
+
+  updateSettings: ({ patch: { jevKey: _computed, ...patch } }) => {
     db.setSettings(patch)
     if (patch.openAtLogin !== undefined) toMain({ type: 'login_item', open: patch.openAtLogin })
     emit({ type: 'settings', settings: settings() })
