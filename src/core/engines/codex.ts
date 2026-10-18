@@ -11,10 +11,12 @@ export function codexEnv(home: string): NodeJS.ProcessEnv {
 }
 
 // Built-in capabilities agents must not have: their tools come only from the gateway.
+// Not code_mode_host: Codex routes every tool call through it, MCP ones included,
+// and without it they all fail ("code-mode host is disabled"). It gives no shell
+// or files of its own: asked to read ~/.zshrc with it, the model found no way to.
 export const CODEX_DISABLED_FEATURES = [
   'shell_tool',
   'unified_exec',
-  'code_mode_host',
   'apps',
   'plugins',
   'browser_use',

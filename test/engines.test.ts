@@ -139,6 +139,7 @@ describe('Codex exec stream', () => {
   it('turns off skills, web search, project docs and every built-in tool', () => {
     const args = codexArgs({ model: 'gpt-5.6-luna', effort: 'low', system: 'x', cwd: '/tmp/x' })
     expect(args).toEqual(expect.arrayContaining(['skills.include_instructions=false', 'skills.bundled.enabled=false', 'web_search="disabled"', 'project_doc_max_bytes=0']))
+    expect(CODEX_DISABLED_FEATURES).not.toContain('code_mode_host') // every tool call goes through it
     for (const f of ['shell_tool', 'unified_exec', 'plugins', 'computer_use', 'multi_agent']) {
       expect(CODEX_DISABLED_FEATURES).toContain(f)
       expect(args[args.indexOf(f) - 1]).toBe('--disable')
