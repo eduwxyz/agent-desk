@@ -30,12 +30,12 @@ export const CODEX_DISABLED_FEATURES = [
   'memories'
 ]
 
-// Flags that keep the CLI isolated: ignore config and rules, no skills, no web
-// search, no project docs, built-in tools off, no saved session, and a
+// Flags that keep the CLI isolated: ignore config and rules, no skills, web
+// search only when the agent has it, no project docs, built-in tools off, no saved session, and a
 // read-only sandbox in an empty directory as a last line of defense. The prompt comes from stdin ("-"). The app's gateway,
 // when given, is the only MCP server, with its tools approved up front: the
 // gateway decides what runs.
-export function codexArgs(turn: Pick<Turn, 'model' | 'effort' | 'system' | 'cwd' | 'mcpUrl'>): string[] {
+export function codexArgs(turn: Pick<Turn, 'model' | 'effort' | 'system' | 'cwd' | 'mcpUrl' | 'web'>): string[] {
   const gateway = turn.mcpUrl
     ? [
         '-c', `mcp_servers.${GATEWAY_NAME}.url=${JSON.stringify(turn.mcpUrl)}`,
@@ -57,7 +57,7 @@ export function codexArgs(turn: Pick<Turn, 'model' | 'effort' | 'system' | 'cwd'
     '-c', `developer_instructions=${JSON.stringify(turn.system)}`,
     '-c', 'skills.include_instructions=false',
     '-c', 'skills.bundled.enabled=false',
-    '-c', 'web_search="disabled"',
+    '-c', `web_search=${turn.web ? '"live"' : '"disabled"'}`,
     '-c', 'project_doc_max_bytes=0',
     ...CODEX_DISABLED_FEATURES.flatMap((f) => ['--disable', f]),
     ...gateway,
@@ -78,7 +78,12 @@ export function codexParser(): Parser {
 
       if (type === 'item.completed') {
         const item = ev['item'] as Record<string, unknown> | undefined
-        if (item?.['type'] === 'agent_message' && typeof item['text'] === 'string') {
+        if (item?.['type'] === 'web_search') {
+          const action = (item['action'] ?? {}) as Record<string, unknown>
+          const url = typeof action['url'] === 'string' ? action['url'] : undefined
+          if (url) out.push({ type: 'web', action: 'fetch', detail: url })
+          else out.push({ type: 'web', action: 'search', detail: String(item['query'] ?? action['query'] ?? '') })
+        } else if (item?.['type'] === 'agent_message' && typeof item['text'] === 'string') {
           const delta = text ? `\n\n${item['text']}` : item['text']
           text += delta
           out.push({ type: 'text', delta })

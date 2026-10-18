@@ -263,6 +263,22 @@ export function AgentPage({ id }: { id?: string }): ReactNode {
             </p>
           </Card>
 
+          <Card title="Web" lead={`Pesquisa e lê páginas com a ferramenta do próprio Claude Code ou Codex, na sua assinatura. Cada busca aparece nos passos da resposta.${isNew ? '' : ' Muda na hora, sem precisar salvar.'}`}>
+            <div className="segmented segmented--wide" role="radiogroup" aria-label="Web">
+              {[false, true].map((v) => (
+                <button
+                  key={String(v)}
+                  role="radio"
+                  aria-checked={(draft.web !== false) === v}
+                  className={(draft.web !== false) === v ? 'is-active' : ''}
+                  onClick={() => (isNew ? patch({ web: v }) : (setDraft((d) => ({ ...d, web: v })), patchAgent(draft.id, { web: v })))}
+                >
+                  {v ? 'Ligada' : 'Desligada'}
+                </button>
+              ))}
+            </div>
+          </Card>
+
           {!isNew && <ComputerCard agentId={draft.id} on={draft.computer} onToggle={(on) => (setDraft((d) => ({ ...d, computer: on })), patchAgent(draft.id, { computer: on }))} />}
 
           <Card

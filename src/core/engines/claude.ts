@@ -2,15 +2,17 @@ import { lastLines, num, parseJson, runCli, type Parser } from './cli'
 import type { Engine, EngineEvent, Turn } from './types'
 
 export const GATEWAY_NAME = 'agentdesk'
+const WEB_TOOLS = ['WebSearch', 'WebFetch'] // run on Anthropic's side, on the subscription
 
-// Flags that keep the CLI isolated: no built-in tools (shell, files, web), no
+// Flags that keep the CLI isolated: no built-in tools (shell, files), no
 // user settings, hooks, plugins or MCP servers, and no saved session. Not
 // --bare: it turns off the subscription login. The app's gateway, when given,
 // is the only MCP server, and its tools are pre-allowed: the gateway decides.
-export function claudeArgs(turn: Pick<Turn, 'model' | 'effort' | 'system' | 'mcpUrl'>): string[] {
-  const gateway = turn.mcpUrl
-    ? ['--mcp-config', JSON.stringify({ mcpServers: { [GATEWAY_NAME]: { type: 'http', url: turn.mcpUrl } } }), '--allowedTools', `mcp__${GATEWAY_NAME}`]
-    : []
+// With web, the only built-in tools are web search and page reading.
+export function claudeArgs(turn: Pick<Turn, 'model' | 'effort' | 'system' | 'mcpUrl' | 'web'>): string[] {
+  const web = turn.web ? WEB_TOOLS : []
+  const allowed = [...(turn.mcpUrl ? [`mcp__${GATEWAY_NAME}`] : []), ...web]
+  const gateway = turn.mcpUrl ? ['--mcp-config', JSON.stringify({ mcpServers: { [GATEWAY_NAME]: { type: 'http', url: turn.mcpUrl } } })] : []
   return [
     '-p',
     '--output-format', 'stream-json',
@@ -19,11 +21,12 @@ export function claudeArgs(turn: Pick<Turn, 'model' | 'effort' | 'system' | 'mcp
     '--model', turn.model,
     '--effort', turn.effort,
     '--system-prompt', turn.system,
-    '--tools', '',
+    '--tools', web.join(','),
     '--strict-mcp-config',
     '--setting-sources', '',
     '--no-session-persistence',
-    ...gateway
+    ...gateway,
+    ...(allowed.length ? ['--allowedTools', ...allowed] : [])
   ]
 }
 
@@ -63,6 +66,15 @@ export function claudeParser(): Parser {
         } else if (e['type'] === 'message_delta') {
           callOutput = num((e['usage'] as Record<string, unknown> | undefined)?.['output_tokens'])
           out.push({ type: 'progress', tokens: doneTokens + callInput + callOutput })
+        }
+      } else if (ev['type'] === 'assistant') {
+        // The full message after its stream: where built-in tool calls show up whole.
+        const content = ((ev['message'] as Record<string, unknown> | undefined)?.['content'] ?? []) as Record<string, unknown>[]
+        for (const c of Array.isArray(content) ? content : []) {
+          const input = (c['input'] ?? {}) as Record<string, unknown>
+          if (c['type'] !== 'tool_use') continue
+          if (c['name'] === 'WebSearch') out.push({ type: 'web', action: 'search', detail: String(input['query'] ?? '') })
+          else if (c['name'] === 'WebFetch') out.push({ type: 'web', action: 'fetch', detail: String(input['url'] ?? '') })
         }
       } else if (ev['type'] === 'result') {
         finished = true

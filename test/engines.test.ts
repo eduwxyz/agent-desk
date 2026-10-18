@@ -73,6 +73,26 @@ describe('Claude Code stream', () => {
     expect(args[args.indexOf('--system-prompt') + 1]).toBe('x')
     expect(args).not.toContain('--bare')
   })
+
+  it('with web, gets only the web tools, pre-allowed, and reports each search and page read', () => {
+    const args = claudeArgs({ model: 'sonnet', effort: 'low', system: 'x', mcpUrl: 'http://127.0.0.1:1/mcp/abc', web: true })
+    expect(args[args.indexOf('--tools') + 1]).toBe('WebSearch,WebFetch')
+    expect(args.slice(args.indexOf('--allowedTools') + 1)).toEqual(['mcp__agentdesk', 'WebSearch', 'WebFetch'])
+    const assistant = JSON.stringify({
+      type: 'assistant',
+      message: {
+        content: [
+          { type: 'tool_use', name: 'WebSearch', input: { query: 'electron release' } },
+          { type: 'tool_use', name: 'WebFetch', input: { url: 'https://electronjs.org', prompt: 'versão?' } },
+          { type: 'tool_use', name: 'mcp__agentdesk__bash', input: {} }
+        ]
+      }
+    })
+    expect(feed(claudeParser(), [assistant]).filter((e) => e.type === 'web')).toEqual([
+      { type: 'web', action: 'search', detail: 'electron release' },
+      { type: 'web', action: 'fetch', detail: 'https://electronjs.org' }
+    ])
+  })
 })
 
 describe('Codex exec stream', () => {
@@ -109,6 +129,15 @@ describe('Codex exec stream', () => {
       expect(CODEX_DISABLED_FEATURES).toContain(f)
       expect(args[args.indexOf(f) - 1]).toBe('--disable')
     }
+  })
+
+  it('with web, searches live and reports each search', () => {
+    expect(codexArgs({ model: 'gpt-5.6-luna', effort: 'low', system: 'x', cwd: '/tmp/x', web: true })).toContain('web_search="live"')
+    const item = (i: object): string => JSON.stringify({ type: 'item.completed', item: { id: 'w', type: 'web_search', ...i } })
+    expect(feed(codexParser(), [item({ query: 'electron release' }), item({ action: { type: 'open_page', url: 'https://electronjs.org' } })]).filter((e) => e.type === 'web')).toEqual([
+      { type: 'web', action: 'search', detail: 'electron release' },
+      { type: 'web', action: 'fetch', detail: 'https://electronjs.org' }
+    ])
   })
 
   it('runs in the app\'s own home, so the user\'s AGENTS.md, skills and memories never load', () => {

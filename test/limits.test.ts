@@ -79,6 +79,43 @@ describe('limits per reply', () => {
   })
 })
 
+describe('web', () => {
+  // Searches with the CLI's own tool, which never passes through the gateway.
+  const searching = (times: number): Engine => ({
+    id: 'claude',
+    async *run(turn): AsyncIterable<EngineEvent> {
+      expect(turn.web).toBe(true)
+      for (let i = 0; i < times && !turn.signal.aborted; i++) yield { type: 'web', action: 'search', detail: `busca ${i}` }
+      if (!turn.signal.aborted) yield { type: 'done', text: 'Achei.', usage: { inputTokens: 100, cacheReadTokens: 0, outputTokens: 1 } }
+    }
+  })
+
+  it('shows each search as a step, and counts it toward the tool call cap', async () => {
+    const r = runner(searching(2))
+    await r.send('d1', 'pesquisa aí')
+    await r.idle()
+    expect(reply().run?.steps.filter((s) => s.label === 'Pesquisou na web').map((s) => s.detail)).toEqual(['busca 0', 'busca 1'])
+
+    settings.runMaxToolCalls = 3
+    const r2 = runner(searching(50))
+    await r2.send('d1', 'pesquisa tudo')
+    await r2.idle()
+    expect(reply().run).toMatchObject({ status: 'failed', error: expect.stringContaining('passei de 3 chamadas de ferramenta') as string })
+  })
+
+  it('is on unless turned off on the agent', async () => {
+    db.saveAgent(agent({ web: false }))
+    expect(db.agent('a1')!.web).toBe(false)
+    const seen: (boolean | undefined)[] = []
+    const r = runner({ id: 'claude', run: (t) => (seen.push(t.web), fakeEngine('claude', { delayMs: 1 }).run(t)) })
+    await r.send('d1', 'oi')
+    await r.idle()
+    expect(seen).toEqual([false])
+    db.saveAgent(agent())
+    expect(db.agent('a1')!.web).toBe(true)
+  })
+})
+
 describe('usage alert', () => {
   it('warns once, in the conversation and with a notification, when an agent crosses 80% of its limit', async () => {
     db.saveAgent(agent({ limit: 10_000 }))

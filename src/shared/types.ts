@@ -37,6 +37,7 @@ export interface Agent {
   grants: Record<string, GrantLevel>
   memory: MemoryMode
   computer: boolean // has its own Linux computer (spec §13)
+  web?: boolean // searches the web and reads pages with the CLI's own tools (spec §16); on unless false
   folders?: LentFolder[] // Mac folders lent to that computer (spec §13, M5.1); changed only through lendFolder/folderAction
   archived: boolean
 }

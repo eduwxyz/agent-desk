@@ -530,13 +530,15 @@ export class Runner {
           memories: promptMemories,
           canRemember,
           hasComputer: !!computers,
+          web: agent.web !== false,
           routines: routines?.forAgent(agent.id),
           project: conv.project && { files: readContext(conv.project), memories: promptMemories?.project ?? [] }
         }),
         prompt: transcript({ agent, conversation: conv, messages: history, agents: db.agents(), me: settings.workspaceName, task: opts.task, summary }),
         cwd,
         signal: control.ctl.signal,
-        mcpUrl: session?.url
+        mcpUrl: session?.url,
+        web: agent.web !== false
       })
       for await (const ev of events) {
         if (ev.type === 'text') {
@@ -547,6 +549,13 @@ export class Runner {
           turnTokens = ev.tokens
           if (used + turnTokens > agent.limit && !control.reason) {
             control.reason = 'limit'
+            control.ctl.abort()
+          }
+        } else if (ev.type === 'web') {
+          // Not through the gateway, so it can't be refused: it counts, and past the grace the turn is cut.
+          addSteps({ id: randomUUID(), label: ev.action === 'search' ? 'Pesquisou na web' : 'Leu uma página', detail: ev.detail, status: 'done' })
+          if (++calls > maxCalls + OVER_CALLS_GRACE && !control.reason) {
+            control.reason = 'tools'
             control.ctl.abort()
           }
         } else if (ev.type === 'done') {
