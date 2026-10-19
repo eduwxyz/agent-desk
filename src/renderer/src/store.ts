@@ -24,6 +24,7 @@ import {
   type Skill,
   type SkillInput,
   type SkillVersion,
+  type Report,
   type Trigger
 } from '../../shared/types'
 import { call, connect } from './rpc'
@@ -40,6 +41,7 @@ export type View =
   | { kind: 'memory' }
   | { kind: 'routines' }
   | { kind: 'skills' }
+  | { kind: 'report' }
   | { kind: 'settings' }
 
 export interface State {
@@ -317,8 +319,8 @@ export const stopRun = (messageId: string): void => void call('stopRun', { messa
 export const retryRun = (messageId: string): void => void call('retryRun', { messageId })
 export const continueRun = (messageId: string): void => void call('continueRun', { messageId })
 
-export const decideApproval = (id: string, decision: 'approved' | 'refused', reason?: string): void =>
-  void call('decideApproval', { id, decision, reason })
+export const decideApproval = (id: string, decision: 'approved' | 'refused', reason?: string, always?: boolean): void =>
+  void call('decideApproval', { id, decision, reason, always })
 
 export const addMemory = (scope: MemoryScope, text: string): void => void call('addMemory', { scope, text })
 export const editMemory = (id: string, text: string): void => void call('editMemory', { id, text })
@@ -354,6 +356,12 @@ export const skillVersions = (skillId: string): Promise<SkillVersion[]> => call(
 export const checkTrigger = (trigger: Trigger): Promise<string> => call('checkTrigger', { trigger })
 export const setTelegramToken = (token: string | null): Promise<void> => call('setTelegramToken', { token })
 export const unpairTelegram = (): void => void call('unpairTelegram')
+export const setGithubToken = (token: string | null): Promise<void> => call('setGithubToken', { token })
+export const exportTeam = (): Promise<string> => call('exportTeam')
+export const importTeam = (text: string): Promise<string> => call('importTeam', { text })
+export const backupNow = (): Promise<string> => call('backupNow')
+export const openBackups = (): void => void call('openBackups')
+export const loadReport = (): Promise<Report> => call('report')
 export const removeRoutine = (id: string): void => void call('removeRoutine', { id })
 export const runRoutine = (id: string): void => void call('runRoutine', { id })
 // The id of the DM with an agent, created if it doesn't exist yet, without opening it.

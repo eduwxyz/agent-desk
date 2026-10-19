@@ -67,6 +67,7 @@ export function fakeEngine(id: Engine['id'], opts: { delayMs?: number; reply?: (
 
       const inputTokens = Math.ceil((turn.system.length + turn.prompt.length) / 4)
       yield { type: 'progress', tokens: inputTokens + spend }
+      if (id === 'claude') yield { type: 'quota', quota: { fiveHour: { utilization: 0.34, resetsAt: Date.now() + 2 * 3_600_000 }, sevenDay: { utilization: 0.21, resetsAt: Date.now() + 4 * 86_400_000 }, at: Date.now() } }
       let text = ''
       for (const word of reply.split(/(\s+)/)) {
         if (turn.signal.aborted) return

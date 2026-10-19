@@ -58,6 +58,7 @@ export interface RoutineDeps {
   db: Db
   runner: { runRoutine(r: Routine, when: { scheduledAt: number; late: boolean; event?: RoutineEvent }): Promise<Message | undefined> }
   connectors?: { call(id: string, tool: string, args: Record<string, unknown>): Promise<CallToolResult>; list(): Connector[] }
+  blocked?: () => boolean // paused, or quiet hours: nothing is due until it ends (then it runs late)
   emit: (e: CoreEvent) => void
   notify?: (title: string, body: string, conversationId: string) => void
   now?: () => number
@@ -96,7 +97,7 @@ export class Routines {
 
   // Runs what is due once, at most, and moves each due routine to its next time.
   tick(): void {
-    if (!this.awake) return
+    if (!this.awake || this.deps.blocked?.()) return
     const now = this.now()
     for (const r of this.deps.db.routines()) {
       if (r.enabled && r.trigger?.kind === 'poll' && now - (r.trigger.checkedAt ?? 0) >= r.trigger.everyMinutes * 60_000) void this.check(r)

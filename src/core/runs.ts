@@ -3,11 +3,12 @@ import { basename, join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import type { CoreEvent } from '../shared/rpc'
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
-import { CACHE_READ_WEIGHT, describeSchedule, ENGINES, ERRORS_STOP, modelInfo, REPEAT_STOP, REPEAT_WARN, RUN_BUDGET_PCT, RUN_STALL_MINUTES, type Agent, type Approval, type Connector, type ConnectorTool, type Conversation, type EngineId, type Message, type Receipt, type Routine, type Run, type RunStatus, type Settings, type Step } from '../shared/types'
+import { ACCESS_REQUEST, CACHE_READ_WEIGHT, describeSchedule, workIn, ENGINES, ERRORS_STOP, modelInfo, REPEAT_STOP, REPEAT_WARN, RUN_BUDGET_PCT, RUN_STALL_MINUTES, type Agent, type Approval, type Connector, type ConnectorTool, type Conversation, type EngineId, type Message, type Quota, type Receipt, type Routine, type Run, type RunStatus, type Settings, type Step } from '../shared/types'
 import { HISTORY_LIMIT, mentioned, systemPrompt, transcript } from './context'
 import { LEMBRAR, type Memories } from './memory'
 import { COMPUTER_TOOL_NAMES, COMPUTER_TOOLS, stepFor, type Computers } from './computer'
 import { AGENDAR, CANCELAR, ROUTINE_TOOL_NAMES, type Routines } from './routines'
+import { ABRIR_PR, GITHUB, type GitHub } from './github'
 import { readContext } from './projects'
 import { LER_SKILL, PROPOR_SKILL, SKILL_TOOL_NAMES, type Skills } from './skills'
 import type { Db } from './db'
@@ -52,6 +53,8 @@ export interface RunnerDeps {
   notify?: (title: string, body: string, conversationId?: string, kind?: 'approval') => void
   jev?: { key(): Promise<string | undefined>; fetch?: typeof fetch } // the TypeSafe router, when chosen in settings
   onBusy?: (busy: boolean) => void // some reply is running (the Mac shouldn't sleep) or none is
+  onQuota?: (q: Quota) => void // the subscription's windows, as the CLI reports them
+  github?: Pick<GitHub, 'pushable' | 'openPr'> // without it, agents can't open PRs
   skills?: Pick<Skills, 'forAgent' | 'read' | 'propose'> // without it, agents have no skills
 }
 
@@ -104,9 +107,14 @@ export class Runner {
   private active = 0
   private routing = 0
   private controllers = new Map<string, Control>()
+  private paused = false // "Pausar tudo": nobody starts working until it's off
   private idleWaiters: (() => void)[] = []
 
   constructor(private deps: RunnerDeps) {}
+
+  setPaused(paused: boolean): void {
+    this.paused = paused
+  }
 
   // Saves the human message and decides who answers it: mentioned agents
   // first, then whoever asked a pending question, then the DM agent or the
@@ -133,6 +141,10 @@ export class Runner {
 
     if (members.length === 0) {
       this.post(conv.id, 'Ninguém está neste canal ainda. Adicione agentes na página de cada um (Canais) e mande de novo.')
+      return
+    }
+    if (this.paused) {
+      this.post(conv.id, 'Os agentes estão pausados: ninguém responde até você retomar (botão no topo da barra lateral).')
       return
     }
     if (responders.length === 0) {
@@ -185,7 +197,7 @@ export class Runner {
     ]
       .filter(Boolean)
       .join('\n\n')
-    this.enqueue(() => this.execute(agent, conv, { depth: msg.run!.depth ?? 1, task }))
+    this.enqueue(() => this.execute(agent, conv, { depth: msg.run!.depth ?? 1, task, work: msg.run!.work }))
   }
 
   // Posts a routine's request in its conversation and runs its agent on it.
@@ -222,7 +234,7 @@ export class Runner {
       .join(' ')
     return new Promise((resolve) =>
       this.enqueue(() =>
-        this.execute(agent, conv, { depth: 1, task }).then(resolve, (e: unknown) => {
+        this.execute(agent, conv, { depth: 1, task, work: event ? workIn(event.title) : undefined }).then(resolve, (e: unknown) => {
           resolve(undefined)
           throw e
         })
@@ -338,7 +350,7 @@ export class Runner {
     }
   }
 
-  private async execute(agent: Agent, conv: Conversation, opts: { depth: number; existing?: Message; task?: string }): Promise<Message> {
+  private async execute(agent: Agent, conv: Conversation, opts: { depth: number; existing?: Message; task?: string; work?: string }): Promise<Message> {
     const { db, emit, engines } = this.deps
     const settings = await this.deps.settings()
     agent = db.agent(agent.id) ?? agent // limits or instructions may have changed while queued
@@ -393,6 +405,9 @@ export class Runner {
         .filter((m) => m.id !== msg.id && m.at <= msg.at)
         .slice(-HISTORY_LIMIT)
     }
+    // What this reply counts toward: given (a chain, a routine's issue), or an issue named in the message it answers.
+    const asked = [...history].reverse().find((m) => m.author.kind === 'me' || m.author.kind === 'routine')
+    const work = opts.work ?? opts.existing?.run?.work ?? (asked ? workIn(asked.text) : undefined)
     const canRemember = !!memory && !!this.deps.gateway && agent.memory !== 'read'
     const computers = this.deps.gateway && agent.computer ? this.deps.computers : undefined
     const routines = this.deps.gateway ? this.deps.routines : undefined
@@ -456,13 +471,51 @@ export class Runner {
     const services: string[] = []
     const routineIds: string[] = []
     const exposed = new Map<string, Exposed>()
-    const taken = new Set<string>([ASK_USER.name, LEMBRAR.name, ...COMPUTER_TOOL_NAMES, ...ROUTINE_TOOL_NAMES])
+    const taken = new Set<string>([ASK_USER.name, ACCESS_REQUEST, ABRIR_PR, LEMBRAR.name, ...COMPUTER_TOOL_NAMES, ...ROUTINE_TOOL_NAMES, ...SKILL_TOOL_NAMES])
     for (const c of this.deps.connectors?.list() ?? []) {
       if (c.status !== 'connected') continue
       for (const t of db.tools(c.id)) if (allowed(t, agent.grants[c.id])) exposed.set(exposedName(c, t.name, taken), { connector: c, tool: t })
     }
+    // pedir_acesso: the connectors this agent could get more of; I decide, like any approval.
+    const lacking = (this.deps.connectors?.list() ?? []).filter((c) => agent.grants[c.id] !== 'read_write')
+    const accessTool: ToolDef | undefined =
+      this.deps.gateway && lacking.length
+        ? {
+            name: ACCESS_REQUEST,
+            description: `Pede a ${settings.workspaceName} acesso a um conector que você não tem (ou só lê), quando a tarefa precisa dele. Vira um pedido de aprovação; se for liberado, você continua numa nova mensagem.`,
+            inputSchema: {
+              type: 'object',
+              properties: {
+                conector: { type: 'string', enum: lacking.map((c) => c.name) },
+                nivel: { type: 'string', enum: ['read', 'read_write'], description: 'read: só ler. read_write: ler e mudar (ações sensíveis ainda pedem aprovação).' },
+                motivo: { type: 'string', description: 'Pra que, em uma frase.' }
+              },
+              required: ['conector', 'nivel', 'motivo']
+            }
+          }
+        : undefined
+    // abrir_pr: in a project channel whose repository this agent can push to.
+    const repo = this.deps.gateway ? this.deps.github?.pushable(agent, conv) : undefined
+    const prTool: ToolDef | undefined = repo
+      ? {
+          name: ABRIR_PR,
+          description: `Pede pra abrir uma pull request em ${repo} com uma branch agent/* que você já publicou com git push. Vira um pedido de aprovação; aprovada, o app abre a PR e você recebe o link.`,
+          inputSchema: {
+            type: 'object',
+            properties: {
+              branch: { type: 'string', description: 'A branch publicada, ex.: agent/lembrete-duplicado.' },
+              titulo: { type: 'string' },
+              descricao: { type: 'string', description: 'Em Markdown: o que mudou, por quê, como foi testado, o que falta conferir (ex.: o build no Xcode).' },
+              base: { type: 'string', description: 'A branch de destino. Default: main.' }
+            },
+            required: ['branch', 'titulo', 'descricao']
+          }
+        }
+      : undefined
     const toolDefs: ToolDef[] = [
       ASK_USER,
+      ...(accessTool ? [accessTool] : []),
+      ...(prTool ? [prTool] : []),
       ...(canRemember ? [LEMBRAR] : []),
       ...(computers ? COMPUTER_TOOLS : []),
       ...(routines ? [AGENDAR, CANCELAR] : []),
@@ -549,6 +602,67 @@ export class Runner {
           return clip(out.result)
         }
 
+        if (name === ABRIR_PR && repo) {
+          const branch = typeof args['branch'] === 'string' ? args['branch'].trim().replace(/^refs\/heads\//, '') : ''
+          const title = typeof args['titulo'] === 'string' ? args['titulo'].trim() : ''
+          if (!/^agent\/[A-Za-z0-9._\/-]+$/.test(branch)) return textResult('A branch precisa ser agent/<assunto>, já publicada com git push.', true)
+          if (!title) return textResult('Faltou o título.', true)
+          if (question || approval) return textResult('Já existe um pedido esperando decisão nesta mensagem. Encerre agora.', true)
+          const prArgs = { repo, head: branch, base: typeof args['base'] === 'string' && args['base'].trim() ? args['base'].trim() : 'main', title, body: typeof args['descricao'] === 'string' ? args['descricao'] : '' }
+          approval = {
+            id: randomUUID(),
+            hash: approvalHash(GITHUB, ABRIR_PR, prArgs),
+            agentId: agent.id,
+            conversationId: conv.id,
+            messageId: msg.id,
+            connectorId: GITHUB,
+            connectorName: 'GitHub',
+            tool: ABRIR_PR,
+            args: prArgs,
+            why: title,
+            highRisk: false,
+            state: 'pending',
+            createdAt: Date.now(),
+            expiresAt: Date.now() + settings.approvalTtlHours * 3_600_000
+          }
+          db.createApproval(approval)
+          emit({ type: 'approval', approval })
+          msg.run = { ...msg.run!, approvalId: approval.id }
+          addSteps({ id: randomUUID(), label: 'Pediu pra abrir a PR', detail: `${branch} → ${prArgs.base}`, status: 'done' })
+          this.deps.notify?.(`${agent.name} quer abrir uma PR`, `${repo}: ${title}`, conv.id, 'approval')
+          return textResult(`Pedido de PR criado. A PR ainda NÃO existe. Encerre sua resposta agora dizendo em uma frase o que vai na PR. Quando ${settings.workspaceName} aprovar, você recebe o link numa nova mensagem.`)
+        }
+
+        if (name === ACCESS_REQUEST && accessTool) {
+          const c = this.deps.connectors?.list().find((x) => x.name === args['conector'])
+          const nivel = args['nivel'] === 'read_write' ? 'read_write' : 'read'
+          if (!c) return textResult('Esse conector não existe. Use um da lista.', true)
+          if (question || approval) return textResult('Já existe um pedido esperando decisão nesta mensagem. Encerre agora.', true)
+          const why = typeof args['motivo'] === 'string' ? args['motivo'].trim() : ''
+          approval = {
+            id: randomUUID(),
+            hash: approvalHash(c.id, ACCESS_REQUEST, { nivel }),
+            agentId: agent.id,
+            conversationId: conv.id,
+            messageId: msg.id,
+            connectorId: c.id,
+            connectorName: c.name,
+            tool: ACCESS_REQUEST,
+            args: { nivel },
+            why,
+            highRisk: false,
+            state: 'pending',
+            createdAt: Date.now(),
+            expiresAt: Date.now() + settings.approvalTtlHours * 3_600_000
+          }
+          db.createApproval(approval)
+          emit({ type: 'approval', approval })
+          msg.run = { ...msg.run!, approvalId: approval.id }
+          addSteps({ id: randomUUID(), label: 'Pediu acesso', detail: `${c.name} · ${nivel === 'read' ? 'ler' : 'ler e escrever'}`, status: 'done' })
+          this.deps.notify?.(`${agent.name} pede acesso ao ${c.name}`, why || (nivel === 'read' ? 'Pra ler.' : 'Pra ler e escrever.'), conv.id, 'approval')
+          return textResult(`Pedido de acesso enviado. Encerre sua resposta agora dizendo em uma frase o que pediu e por quê. Se ${settings.workspaceName} liberar, você continua numa nova mensagem.`)
+        }
+
         const hit = exposed.get(name)
         if (!hit) return textResult(`Ferramenta desconhecida: ${name}`, true)
         // Defense in depth: grants or the tool may have changed since the turn started.
@@ -556,7 +670,9 @@ export class Runner {
         if (!current || !allowed(current, db.agent(agent.id)?.grants[hit.connector.id])) return textResult(`Ferramenta não permitida agora: ${name}`, true)
         const detail = `${hit.connector.name} · ${current.name}`
 
-        if (current.cls === 'sensitive') {
+        // "Sempre permitir": a sensitive tool approved for good runs like a write one (never a high-risk one).
+        const always = current.cls === 'sensitive' && !current.highRisk && !!db.agent(agent.id)?.autoApprove?.includes(`${hit.connector.id}:${current.name}`)
+        if (current.cls === 'sensitive' && !always) {
           if (question || approval) return textResult('Já existe um pedido esperando decisão nesta mensagem. Encerre agora.', true)
           const { [REASON_PARAM]: why, ...callArgs } = args
           approval = {
@@ -586,7 +702,7 @@ export class Runner {
         }
 
         const t0 = Date.now()
-        const step: Step = { id: randomUUID(), label: current.cls === 'read' ? 'Consultou' : 'Executou', detail, status: 'running' }
+        const step: Step = { id: randomUUID(), label: current.cls === 'read' ? 'Consultou' : always ? 'Executou (sempre permitido)' : 'Executou', detail, status: 'running' }
         flush()
         msg.run = { ...msg.run!, steps: [...closeThinking('done', 'Pensou'), step] }
         save()
@@ -596,7 +712,8 @@ export class Runner {
           save()
         }
         try {
-          const r = await this.deps.connectors!.call(hit.connector.id, current.name, args)
+          const { [REASON_PARAM]: _reason, ...toolArgs } = args
+          const r = await this.deps.connectors!.call(hit.connector.id, current.name, toolArgs)
           finish(r.isError ? 'error' : 'done')
           return clip(r)
         } catch (e) {
@@ -658,6 +775,7 @@ export class Runner {
           web: agent.web !== false,
           routines: routines?.forAgent(agent.id),
           skills: skills && mySkills,
+          publish: repo,
           project: conv.project && { files: readContext(conv.project), memories: promptMemories?.project ?? [] }
         }),
         prompt: blocks.join('\n\n'),
@@ -682,6 +800,8 @@ export class Runner {
             overBudget = true
             if (counted > budget * BUDGET_OVERRUN) halt('budget')
           }
+        } else if (ev.type === 'quota') {
+          this.deps.onQuota?.(ev.quota)
         } else if (ev.type === 'web') {
           // Not through the gateway, so it can't be refused or warned: the same search over and over is a loop.
           addSteps({ id: randomUUID(), label: ev.action === 'search' ? 'Pesquisou na web' : 'Leu uma página', detail: ev.detail, status: 'done' })
@@ -707,7 +827,7 @@ export class Runner {
       : progress.tokens > 0
         ? { model: agent.modelId, ms, inputTokens: progress.tokens, cacheReadTokens: progress.cacheRead, outputTokens: 0 } // partial: what the stream reported before it ended
         : undefined
-    if (receipt) db.addReceipt({ ...receipt, messageId: msg.id, agentId: agent.id, engine: engineId, at: Date.now() })
+    if (receipt) db.addReceipt({ ...receipt, messageId: msg.id, agentId: agent.id, engine: engineId, at: Date.now(), work })
     const usedNow = db.usedThisMonth(agent.id)
     if (used < agent.limit * USAGE_ALERT && usedNow >= agent.limit * USAGE_ALERT && usedNow < agent.limit) {
       const pct = `${Math.floor((usedNow / agent.limit) * 100)}%`
@@ -715,7 +835,7 @@ export class Runner {
       this.deps.notify?.(`${agent.name} usou ${pct} do limite do mês`, `${tokenCount(usedNow)} de ${tokenCount(agent.limit)} tokens. Dá pra aumentar na página dele.`, conv.id)
     }
 
-    const base = { depth: opts.depth, receipt, question, approvalId: approval?.id, memoryIds: memoryIds.length ? memoryIds : undefined, artifactIds: artifactIds.length ? artifactIds : undefined, services: services.length ? services : undefined, routineIds: routineIds.length ? routineIds : undefined }
+    const base = { depth: opts.depth, work, receipt, question, approvalId: approval?.id, memoryIds: memoryIds.length ? memoryIds : undefined, artifactIds: artifactIds.length ? artifactIds : undefined, services: services.length ? services : undefined, routineIds: routineIds.length ? routineIds : undefined }
     if (control.reason === 'stopped') {
       save({ run: { ...base, status: 'stopped', steps: closeThinking('error', 'Parado') } })
     } else if (control.reason === 'loop' || control.reason === 'errors' || control.reason === 'stall') {
@@ -758,10 +878,16 @@ export class Runner {
 
   // The first decision wins. Approving runs exactly the stored call (after
   // checking the grant again); either way the agent gets a new turn with the outcome.
-  async decide(id: string, decision: 'approved' | 'refused' | 'expired', reason?: string): Promise<void> {
+  // `always` ("Sempre permitir"): from now on this agent uses that tool without asking; never a high-risk one.
+  async decide(id: string, decision: 'approved' | 'refused' | 'expired', reason?: string, always?: boolean): Promise<void> {
     const { db, emit } = this.deps
     const ap = db.approval(id)
     if (!ap || ap.state !== 'pending' || !db.decideApproval(id, decision, reason)) return
+    const owner = db.agent(ap.agentId)
+    if (always && decision === 'approved' && owner && !ap.highRisk && ap.tool !== ACCESS_REQUEST && ap.connectorId !== GITHUB && !owner.autoApprove?.includes(`${ap.connectorId}:${ap.tool}`)) {
+      db.saveAgent({ ...owner, autoApprove: [...(owner.autoApprove ?? []), `${ap.connectorId}:${ap.tool}`] })
+      emit({ type: 'agent', agent: db.agent(owner.id)! })
+    }
     const settings = await this.deps.settings()
     const me = settings.workspaceName
     const agent = db.agent(ap.agentId)
@@ -770,7 +896,39 @@ export class Runner {
 
     let outcome: string
     let task: string
-    if (decision === 'approved') {
+    if (ap.connectorId === GITHUB && ap.tool === ABRIR_PR) {
+      if (decision === 'approved') {
+        try {
+          const work = db.message(ap.messageId)?.run?.work
+          const cost = work ? db.costByWork(0).find((w) => w.work === work) : undefined
+          const footer = `\n\n---\nFeita por ${agent?.name ?? 'um agente'} no agent-desk${cost ? ` · ${work}: ${tokenCount(cost.tokens)} tokens em ${cost.replies} resposta${cost.replies > 1 ? 's' : ''} até aqui` : ''}.`
+          const pr = await this.deps.github!.openPr({ ...ap.args, body: `${String(ap.args['body'] ?? '')}${footer}` })
+          outcome = `Abriu a PR #${pr.number}.`
+          task = `${me} aprovou, e o app abriu a PR #${pr.number}: ${pr.url}\n\nAvise ${me} com o link em uma frase.`
+        } catch (e) {
+          const err = e instanceof Error ? e.message : String(e)
+          outcome = `Falhou: ${err}`
+          task = `${me} aprovou a PR, mas ela não abriu: ${err}. Conte a ${me} e diga o que fazer (a branch foi publicada? já existe uma PR dela?).`
+        }
+      } else {
+        outcome = decision === 'refused' ? 'Nada foi aberto.' : 'Expirou sem decisão.'
+        task = `${me} ${decision === 'refused' ? `recusou a PR${reason ? `: "${reason}"` : ''}` : 'não respondeu ao pedido de PR'}. Nada foi aberto. Responda considerando isso.`
+      }
+    } else if (ap.tool === ACCESS_REQUEST) {
+      // A grant, not a tool call: approving gives the agent that level on the connector.
+      const nivel = ap.args['nivel'] === 'read_write' ? 'read_write' : 'read'
+      const label = nivel === 'read' ? 'ler' : 'ler e escrever'
+      if (decision === 'approved' && agent) {
+        const fresh = db.agent(agent.id)!
+        db.saveAgent({ ...fresh, grants: { ...fresh.grants, [ap.connectorId]: nivel } })
+        emit({ type: 'agent', agent: db.agent(agent.id)! })
+        outcome = `Acesso liberado: ${label}.`
+        task = `${me} liberou o seu acesso ao ${ap.connectorName} (${label}). As ferramentas dele já estão com você. Continue de onde parou.`
+      } else {
+        outcome = decision === 'refused' ? 'Acesso não liberado.' : 'Expirou sem decisão.'
+        task = `${me} ${decision === 'refused' ? `não liberou o acesso ao ${ap.connectorName}${reason ? `: "${reason}"` : ''}` : `não respondeu ao pedido de acesso ao ${ap.connectorName}`}. Continue sem ele, se der, ou diga o que fica faltando.`
+      }
+    } else if (decision === 'approved') {
       const tool = db.tools(ap.connectorId).find((t) => t.name === ap.tool)
       const connector = this.deps.connectors?.list().find((c) => c.id === ap.connectorId)
       if (!agent || !connector || !tool || !allowed(tool, agent.grants[ap.connectorId])) {
@@ -808,7 +966,7 @@ export class Runner {
         }
       })
     }
-    if (agent && conv && !agent.archived) this.enqueue(() => this.execute(agent, conv, { depth: 1, task }))
+    if (agent && conv && !agent.archived) this.enqueue(() => this.execute(agent, conv, { depth: 1, task, work: msg?.run?.work }))
   }
 
   async expireApprovals(): Promise<void> {
@@ -818,12 +976,13 @@ export class Runner {
   // An agent that mentions another agent of the conversation hands it the turn,
   // up to MAX_DEPTH replies in a row without a human message in between.
   private chain(agent: Agent, conv: Conversation, msg: Message, depth: number): void {
+    if (this.paused) return
     const next = mentioned(msg.text, this.members(conv).filter((a) => a.id !== agent.id)).slice(0, MAX_MENTIONS)
     if (next.length === 0) return
     if (depth >= MAX_DEPTH) {
       this.post(conv.id, `Parei a conversa entre agentes aqui: foram ${MAX_DEPTH} respostas seguidas. Mande uma mensagem pra continuar.`)
       return
     }
-    for (const a of next) this.enqueue(() => this.execute(a, conv, { depth: depth + 1 }))
+    for (const a of next) this.enqueue(() => this.execute(a, conv, { depth: depth + 1, work: msg.run?.work }))
   }
 }

@@ -1,4 +1,4 @@
-import type { Effort, EngineId } from '../../shared/types'
+import type { Effort, EngineId, Quota } from '../../shared/types'
 
 export interface Turn {
   model: string
@@ -26,6 +26,7 @@ export type EngineEvent =
   | { type: 'progress'; tokens: number; cacheRead?: number }
   // A web search or page read the CLI did on its own (not through the gateway).
   | { type: 'web'; action: 'search' | 'fetch'; detail: string }
+  | { type: 'quota'; quota: Quota } // the subscription's usage windows, when the CLI tells
   | { type: 'done'; text: string; usage: Usage }
   | { type: 'error'; message: string }
 

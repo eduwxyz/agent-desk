@@ -272,6 +272,31 @@ Receitas que os agentes seguem pra um tipo de tarefa ("como rodar os testes do C
 - **O que chega:** cada aprovação, com Aprovar/Recusar (alto risco pede um segundo toque); cada pergunta de agente (`ask_user`), que eu respondo respondendo à mensagem, e a resposta entra na conversa como se eu tivesse escrito; o fim das rotinas e os avisos de limite.
 - O Telegram recebe o texto das aprovações e perguntas (ferramenta, argumentos, motivo), e a tela diz isso. Desligado até eu colar um token.
 
+### 20. Boletim e custo por tarefa (M12)
+
+- **Boletim** (sidebar): por agente, nas últimas 6 semanas, quantas respostas terminaram bem (respondeu, perguntou ou pediu aprovação), falharam, foram cortadas por uma trava (loop, erros seguidos, travado) ou pausaram no teto; custo e tempo médios; aprovações recusadas sobre pedidas; e uma barra por semana. Por skill: das respostas que a leram, quantas terminaram bem, e o antes e depois da última mudança. Calculado na hora a partir dos recibos, respostas e aprovações; nada novo é guardado.
+- **Custo por tarefa:** uma resposta conta pra uma issue (`OAB-65`) quando a mensagem que ela responde a cita, quando veio de um gatilho com esse item, ou quando foi chamada por outra resposta, um Continuar ou uma aprovação dela. O recibo guarda a issue; o boletim soma por issue, com os agentes que trabalharam nela. A PR aberta pelo app traz o custo da issue até ali.
+
+### 21. Governança no dia a dia (M12)
+
+- **Sempre permitir:** no cartão de aprovação, "Aprovar e sempre permitir" faz daquela ferramenta uma regra do agente: daí em diante ela roda como escrita, com o passo "Executou (sempre permitido)". Nunca vale pra uma de alto risco, pro pedido de acesso ou pra PR. As regras aparecem na página do agente, com um x pra voltar a pedir.
+- **Pedido de acesso:** `pedir_acesso` (conector, ler ou ler e escrever, motivo) vira um pedido de aprovação; aprovado, o grant muda e o agente continua numa nova resposta com as ferramentas novas.
+- **Pausar tudo:** um botão no topo da barra lateral; pausado, nenhuma resposta começa (a mensagem ganha um aviso), nenhuma rotina roda e agentes não chamam outros. Ao retomar, as rotinas perdidas rodam como atrasadas (até 12 h).
+- **Horário de silêncio:** rotinas e gatilhos esperam e rodam quando ele acaba; mensagens minhas continuam sendo respondidas.
+- **Cota da assinatura:** o Claude Code informa as janelas de 5 h e da semana (`rate_limit_event`); Uso e limites mostra as duas, com quando voltam a zero. O Codex não informa.
+- **Time num arquivo:** "Exportar time" gera um `.md` legível (agentes, skills, canais, rotinas) com um bloco JSON que o app importa; sem credenciais, memórias ou conversas, e grants e gatilhos por nome de conector. Importar só acrescenta o que não existe; rotinas entram desligadas e o computador dos agentes, desligado.
+- **Backup:** uma cópia do banco por dia (`VACUUM INTO`), as últimas 7, em `backups/` na pasta do app, e "Fazer backup agora".
+
+### 22. Da issue à PR (M12)
+
+O computador dos agentes não tem credenciais. Pra publicar:
+
+- **Proxy de git no app** (`127.0.0.1:47718`, alcançado pelo container em `host.docker.internal`). O git de cada computador manda `https://github.com/`, `git@github.com:` e `ssh://git@github.com/` pra `…/git/<código do agente>/` (`url.insteadOf`); o código é um HMAC do id do agente com uma chave só do app.
+- O proxy põe o token (um fine-grained do usuário, guardado no cofre) na saída e só deixa passar o repositório de um projeto do agente: ler pra quem tem a pasta; push só pra quem pode mudá-la, e **só em `refs/heads/agent/*`**. Um push com outra branch é recusado inteiro, no formato do git (`! [remote rejected] main -> main (agent-desk aceita so branches agent/<assunto>)`). O repositório vem do `origin` da pasta do projeto, lido como texto (worktrees incluídos); git nunca roda no Mac numa pasta em que um agente escreve.
+- Cada push aceito vira uma linha no canal do projeto ("**Staff** publicou `agent/x` no GitHub").
+- **`abrir_pr`** (branch agent/*, título, descrição, base): um pedido de aprovação; aprovado, o app abre a PR pela API, com o custo da issue no rodapé, e o agente recebe o link.
+- Testado com git de verdade dentro do computador de um agente, contra um servidor git local no lugar do GitHub: clone e push em `agent/teste` passaram com o token posto pelo proxy; push na main foi recusado com a mensagem acima e a main ficou intacta.
+
 ## Acceptance criteria
 
 1. **Chat básico:** crio um agente no Claude Code, abro DM, mando uma mensagem e vejo a resposta em streaming, com rodapé de modelo/tokens/duração. O mesmo funciona com um agente no Codex.
@@ -312,6 +337,8 @@ Receitas que os agentes seguem pra um tipo de tarefa ("como rodar os testes do C
 27. **Gatilho (M11):** uma rotina olhando `list_issues` do Linear com a label `agente` não dispara pelas issues que já existem; uma issue nova com a label roda o PM uma vez, com a issue no prompt marcada como vinda de fora. Um `curl -d "build falhou"` no endereço da rotina roda o agente com esse texto; um código errado dá 404.
 28. **Skill (M11):** uma skill "testes-do-core" aparece no prompt do Staff; pedindo os testes, ele lê a receita e roda os comandos dela; corrigido, propõe uma mudança que só vale depois que eu aprovo, com diff, e que dá pra desfazer pelo histórico.
 29. **Celular (M11):** com o bot pareado, uma aprovação chega no Telegram com botões e o toque decide; uma ação de alto risco pede dois toques; uma pergunta respondida no Telegram vira a minha mensagem na conversa; outro chat não consegue nada.
+30. **Da issue à PR (M12):** o Staff faz commit em `agent/x` e `git push`; passa, com a linha no canal; um push na main é recusado com o motivo; `abrir_pr` vira um pedido, e aprovado abre a PR com o custo da issue.
+31. **Governança no dia a dia (M12):** "Aprovar e sempre permitir" faz a próxima chamada igual rodar sem pedido (não pra alto risco); um agente sem acesso pede e, aprovado, ganha o grant e continua; pausado, ninguém responde nem roda rotina; o boletim mostra cada agente e o custo por issue.
 
 ## Out of scope (MVP)
 
@@ -409,6 +436,7 @@ Receitas que os agentes seguem pra um tipo de tarefa ("como rodar os testes do C
 9. **M9, web (feito):** busca e leitura de páginas pela ferramenta do próprio motor, ligada por padrão, com passos; a mesma busca 5 vezes conta como loop. (AC 26) Testado com o Claude Code e o Codex reais: os dois pesquisaram e responderam com o link.
 10. **M10, travas e cache (feito):** loop, travado e teto com Continuar no lugar de 50 chamadas e 15 min; cache lido conta 10%; conversa em blocos pro cache. (AC 24) Testado com o Claude Code real: a segunda resposta leu 92% do cache, e um teto baixo pausou e continuou.
 11. **M11, gatilhos, skills e celular (feito):** rotina por item novo num conector ou por chamada local; skills com proposta, diff e histórico; aprovações e perguntas pelo Telegram. (AC 27, 28, 29) Testado de verdade: a chamada local rodou a Lia; o gatilho do Linear olhou e mostrou o erro do conector desautorizado; o Staff leu e propôs skills com o Claude Code real. O Telegram está testado contra uma API simulada; falta o bot real.
+12. **M12, da issue à PR e governança no dia a dia (feito):** proxy de git com push só em agent/* e PR por aprovação; boletim e custo por issue; sempre permitir, pedido de acesso, pausar tudo, horário de silêncio, cota da assinatura, time em .md e backup diário. (AC 30, 31)
 
 O MVP termina quando os oito estiverem prontos e eu usar o app por uma semana no dia a dia.
 

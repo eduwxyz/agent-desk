@@ -266,10 +266,12 @@ export interface ComputerDeps {
   dataDir: string
   emit: (e: CoreEvent) => void
   shoot?: Shooter // screenshots need the main process (Electron's Chromium)
+  gitRemote?: (agentId: string) => string | undefined // the app's GitHub proxy for this agent (spec §22)
 }
 
 export class Computers {
   private infos = new Map<string, ComputerInfo>()
+  private gitSet = new Set<string>() // computers whose git already goes through the proxy, this session
   private ports = new Map<string, Record<number, number>>()
   private starting = new Map<string, Promise<void>>()
   private prefix: string
@@ -345,6 +347,7 @@ export class Computers {
     }
     if (state.code === 0 && running === 'true') {
       if (!this.ports.has(agentId)) await this.readPorts(agentId)
+      await this.pointGit(agentId)
       if (this.infos.get(agentId)?.state !== 'running') this.set(agentId, { state: 'running', services: await this.serviceStatus(agentId) })
       return
     }
@@ -399,7 +402,20 @@ export class Computers {
       await docker(['exec', name, 'bash', '-c', clean], { timeoutMs: 15_000 })
     }
     await this.readPorts(agentId)
+    await this.pointGit(agentId)
     this.set(agentId, { state: 'running', services: await this.serviceStatus(agentId) })
+  }
+
+  // GitHub, by any of its URL forms, goes through the app's proxy, which adds the
+  // token outside the computer and lets through only what the project allows.
+  private async pointGit(agentId: string): Promise<void> {
+    const via = this.deps.gitRemote?.(agentId)
+    if (!via || this.gitSet.has(agentId)) return
+    const name = this.name(agentId)
+    for (const [from, match] of [['https://github.com/', '^https://github'], ['git@github.com:', '^git@github'], ['ssh://git@github.com/', '^ssh://']] as const) {
+      await docker(['exec', name, 'git', 'config', '--global', '--replace-all', `url.${via}.insteadOf`, from, match], { timeoutMs: 15_000 })
+    }
+    this.gitSet.add(agentId)
   }
 
   private fail(agentId: string, stderr: string): never {

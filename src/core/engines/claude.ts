@@ -90,6 +90,12 @@ export function claudeParser(): Parser {
           if (c['name'] === 'WebSearch') out.push({ type: 'web', action: 'search', detail: String(input['query'] ?? '') })
           else if (c['name'] === 'WebFetch') out.push({ type: 'web', action: 'fetch', detail: String(input['url'] ?? '') })
         }
+      } else if (ev['type'] === 'rate_limit_event') {
+        const w = ((ev['rate_limit_info'] as Record<string, unknown> | undefined)?.['unifiedWindows'] ?? {}) as Record<string, Record<string, unknown> | undefined>
+        const win = (k: string): { utilization: number; resetsAt: number } | undefined =>
+          typeof w[k]?.['utilization'] === 'number' ? { utilization: w[k]!['utilization'] as number, resetsAt: num(w[k]!['resetsAt']) * 1000 } : undefined
+        const quota = { fiveHour: win('five_hour'), sevenDay: win('seven_day'), at: Date.now() }
+        if (quota.fiveHour || quota.sevenDay) out.push({ type: 'quota', quota })
       } else if (ev['type'] === 'result') {
         finished = true
         const u = (ev['usage'] ?? {}) as Record<string, unknown>

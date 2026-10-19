@@ -51,6 +51,13 @@ export function Sidebar(): ReactNode {
         <span className="workspace__logo">{s.settings.workspaceName.slice(0, 1)}</span>
         <span className="workspace__name">{s.settings.workspaceName}</span>
         <button
+          className={`icon-btn ${s.settings.paused ? 'is-paused' : ''}`}
+          title={s.settings.paused ? 'Retomar os agentes' : 'Pausar tudo: nenhum agente começa a trabalhar e nenhuma rotina roda'}
+          onClick={() => updateSettings({ paused: !s.settings.paused })}
+        >
+          <Icon name={s.settings.paused ? 'play' : 'pause'} />
+        </button>
+        <button
           className="icon-btn"
           title="Trocar tema"
           onClick={() => updateSettings({ theme: isDark ? 'light' : 'dark' })}
@@ -59,11 +66,17 @@ export function Sidebar(): ReactNode {
         </button>
       </div>
 
+      {s.settings.paused && (
+        <button className="paused-banner" onClick={() => updateSettings({ paused: false })}>
+          <Icon name="pause" size={13} /> Agentes pausados · <u>retomar</u>
+        </button>
+      )}
       <nav className="sidebar__scroll">
         <NavItem view={{ kind: 'approvals' }} icon="shield" label="Aprovações" badge={pending} />
         <NavItem view={{ kind: 'memory' }} icon="book" label="Memória" badge={suggestions} />
         <NavItem view={{ kind: 'routines' }} icon="clock" label="Rotinas" />
         <NavItem view={{ kind: 'skills' }} icon="layers" label="Skills" badge={proposals} />
+        <NavItem view={{ kind: 'report' }} icon="report" label="Boletim" />
 
         <div className="section">
           <div className="section__head">

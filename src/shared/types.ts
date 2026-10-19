@@ -38,6 +38,7 @@ export interface Agent {
   memory: MemoryMode
   computer: boolean // has its own Linux computer (spec §13)
   web?: boolean // searches the web and reads pages with the CLI's own tools (spec §16); on unless false
+  autoApprove?: string[] // "connectorId:tool" sensitive tools approved for good ("sempre permitir"), never high-risk ones
   folders?: LentFolder[] // Mac folders lent to that computer (spec §13, M5.1); changed only through lendFolder/folderAction
   archived: boolean
 }
@@ -109,6 +110,7 @@ export interface Run {
   services?: string[] // services started in this reply, by name, on the author's computer
   routineIds?: string[] // routines scheduled or changed with `agendar_rotina` in this reply
   budget?: number // 'paused': the per-reply budget it reached, in counted tokens
+  work?: string // the piece of work it counts toward, e.g. the issue "OAB-65" (spec §20)
 }
 
 export type Author = { kind: 'me' } | { kind: 'agent'; id: string } | { kind: 'system' } | { kind: 'routine'; id: string }
@@ -138,6 +140,27 @@ export interface Settings {
   runBudgetPct?: number // per reply, % of the agent's monthly limit before it pauses; default RUN_BUDGET_PCT
   runStallMinutes?: number // without any sign of life; default RUN_STALL_MINUTES
   telegram?: TelegramInfo // computed: the phone bot (spec §19)
+  paused?: boolean // "Pausar tudo": no agent starts working, no routine runs
+  quietHours?: { from: string; to: string } | null // "HH:MM": routines and triggers wait, and run late when it ends; null: off
+  quota?: Quota // the Claude subscription's windows, from the last reply (spec §21)
+  github?: { user?: string; error?: string } // computed: the GitHub account the app pushes and opens PRs with (spec §22)
+}
+
+export interface Quota {
+  fiveHour?: { utilization: number; resetsAt: number } // 0..1, ms
+  sevenDay?: { utilization: number; resetsAt: number }
+  at: number
+}
+
+// Whether `now` falls in the quiet hours (which may cross midnight).
+export function inQuietHours(q: Settings['quietHours'], now = new Date()): boolean {
+  if (!q || !validTime(q.from) || !validTime(q.to) || q.from === q.to) return false
+  const m = now.getHours() * 60 + now.getMinutes()
+  const [fh, fm] = q.from.split(':').map(Number) as [number, number]
+  const [th, tm] = q.to.split(':').map(Number) as [number, number]
+  const from = fh * 60 + fm
+  const to = th * 60 + tm
+  return from < to ? m >= from && m < to : m >= from || m < to
 }
 
 export interface TelegramInfo {
@@ -222,6 +245,9 @@ export interface ConnectorInput {
 }
 
 export type ApprovalState = 'pending' | 'approved' | 'refused' | 'expired'
+
+// The approval an agent asks with pedir_acesso: a grant, not a tool call.
+export const ACCESS_REQUEST = 'pedir_acesso'
 
 export interface Approval {
   id: string
@@ -330,6 +356,9 @@ export type Trigger =
   | { kind: 'webhook'; token: string } // POST http://127.0.0.1:WEBHOOK_PORT/gatilho/<token>
 
 export const WEBHOOK_PORT = 47_717
+
+// An issue key in a message ("OAB-65", "SIM-12"): replies about it count toward it.
+export const workIn = (text: string): string | undefined => /\b([A-Z][A-Z0-9]{1,9}-\d{1,6})\b/.exec(text)?.[1]
 export const POLL_MINUTES = [1, 5, 15, 60]
 
 export interface Routine {
@@ -425,3 +454,40 @@ export interface SkillVersion {
 export type SkillInput = Pick<Skill, 'name' | 'description' | 'body' | 'agents'> & { id?: string }
 
 export const skillApplies = (s: Skill, agentId: string): boolean => s.state === 'active' && (s.agents.length === 0 || s.agents.includes(agentId))
+
+// ---------- report (spec §20) ----------
+
+// How each agent and skill is doing, from what is already recorded: whether
+// replies end well, what they cost, loops cut, approvals refused.
+export interface Rate {
+  replies: number
+  ok: number // ended answering, asking or waiting for approval (not failed, cut, paused or stopped)
+}
+
+export interface AgentReport {
+  agentId: string
+  total: Rate
+  failed: number
+  cut: number // stopped by a guard: a loop, failures in a row, stuck
+  paused: number // reached the budget
+  approvals: { asked: number; refused: number }
+  avgTokens: number // counted, per reply
+  avgMs: number
+  weeks: { start: number; rate: Rate; avgTokens: number }[] // oldest first
+}
+
+export interface SkillReport {
+  skillId: string
+  name: string
+  reads: Rate // replies that read it
+  changedAt?: number // its last change
+  before?: Rate // replies that read it before that change
+  since?: Rate // and after
+}
+
+export interface Report {
+  since: number
+  agents: AgentReport[]
+  skills: SkillReport[]
+  work: { work: string; tokens: number; replies: number; agents: string[]; last: number }[]
+}

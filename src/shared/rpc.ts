@@ -1,5 +1,5 @@
 // The contract between the renderer and the core, carried over a MessagePort.
-import type { Agent, Approval, Artifact, ComputerInfo, Connector, ConnectorInput, ConnectorTool, Conversation, EngineId, Memory, MemoryScope, Message, Project, Routine, RoutineInput, Settings, Skill, SkillInput, SkillVersion, Trigger } from './types'
+import type { Agent, Approval, Artifact, ComputerInfo, Connector, ConnectorInput, ConnectorTool, Conversation, EngineId, Memory, MemoryScope, Message, Project, Routine, RoutineInput, Report, Settings, Skill, SkillInput, SkillVersion, Trigger } from './types'
 
 export interface Snapshot {
   settings: Settings
@@ -34,7 +34,7 @@ export interface Api {
   reconnectConnector(p: { id: string }): void
   authorizeConnector(p: { id: string }): void
   updateTool(p: { connectorId: string; name: string; patch: Partial<Pick<ConnectorTool, 'cls' | 'enabled' | 'highRisk'>> }): void
-  decideApproval(p: { id: string; decision: 'approved' | 'refused'; reason?: string }): void
+  decideApproval(p: { id: string; decision: 'approved' | 'refused'; reason?: string; always?: boolean }): void // always: the agent may use that tool without asking again
   addMemory(p: { scope: MemoryScope; text: string }): void
   editMemory(p: { id: string; text: string }): void
   confirmMemory(p: { id: string }): void // "still valid"
@@ -60,6 +60,12 @@ export interface Api {
   checkTrigger(p: { trigger: Trigger }): Promise<string> // what a connector check finds now, for the form
   setTelegramToken(p: { token: string | null }): Promise<void> // checks it with Telegram; throws why it's refused
   unpairTelegram(): void
+  exportTeam(): string // the team as Markdown
+  importTeam(p: { text: string }): string // what was added; throws if it isn't a team file
+  backupNow(): string // where the copy went
+  openBackups(): void
+  report(): Report
+  setGithubToken(p: { token: string | null }): Promise<void> // checked with GitHub; throws why it's refused
   removeRoutine(p: { id: string }): void
   runRoutine(p: { id: string }): void
 }

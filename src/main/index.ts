@@ -50,8 +50,9 @@ function handleCore(child: UtilityProcess, msg: CoreRequest): void {
   } else if (msg.type === 'open') {
     if (/^https?:\/\//.test(msg.url)) void shell.openExternal(msg.url)
   } else if (msg.type === 'open_path') {
-    // Only folders the app keeps (an agent's computer), never an arbitrary path.
-    if (normalize(msg.path).startsWith(join(dataDir(), 'computers') + sep)) void shell.openPath(msg.path)
+    // Only folders the app keeps (an agent's computer, the backups), never an arbitrary path.
+    const path = normalize(msg.path)
+    if (path.startsWith(join(dataDir(), 'computers') + sep) || path === join(dataDir(), 'backups')) void shell.openPath(path)
   } else if (msg.type === 'notify') {
     if (!Notification.isSupported()) return
     const n = new Notification({ title: msg.title, body: msg.body })

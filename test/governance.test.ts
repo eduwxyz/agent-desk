@@ -134,7 +134,7 @@ describe('grants', () => {
     const r = runner((_, tools) => ({ tool: tools.find((t) => t.endsWith('__create_task')) ?? 'tarefas__create_task', args: { title: 'invasora' } }))
     await r.send('d1', 'oi')
     await r.idle()
-    expect(seen.tools[0]).toEqual(['ask_user', 'tarefas__list_tasks'])
+    expect(seen.tools[0]).toEqual(['ask_user', 'pedir_acesso', 'tarefas__list_tasks']) // it can ask for more, not take it
     expect(seen.results[0]).toMatchObject({ isError: true })
     expect(textOf(seen.results[0])).toContain('não permitida')
     expect(tasks().some((t) => t.title === 'invasora')).toBe(false)
@@ -253,5 +253,85 @@ describe('approvals', () => {
     await r.idle()
     expect(db.approvals()[0]).toMatchObject({ state: 'expired', outcome: 'Expirou sem decisão.' })
     expect(seen.turns.at(-1)?.prompt).toContain('expirou sem decisão')
+  })
+})
+
+describe('always allow and asking for access', () => {
+  const askDelete = (turn: Turn): Plan => (turn.prompt.includes('apaga') && !turn.prompt.includes('aprovou') ? { tool: 'tarefas__delete_task', args: { id: 2, _motivo: 'duplicada' } } : null)
+
+  it('"Sempre permitir" turns one approval into a rule: the same tool runs without asking from then on', async () => {
+    db.saveAgent(agent('read_write'))
+    const r = runner(askDelete)
+    await r.send('d1', 'apaga a 2')
+    await r.idle()
+    const [ap] = db.approvals()
+    await r.decide(ap!.id, 'approved', undefined, true)
+    await r.idle()
+    expect(db.agent('a1')!.autoApprove).toEqual([`${connectorId}:delete_task`])
+
+    await r.send('d1', 'apaga a 2 de novo')
+    await r.idle()
+    expect(db.approvals()).toHaveLength(1) // no new request
+    const last = agentMessages().find((m) => m.run?.steps.some((s) => s.label === 'Executou (sempre permitido)'))
+    expect(last).toBeDefined()
+  })
+
+  it('a high-risk tool never becomes a rule', async () => {
+    db.saveAgent(agent('read_write'))
+    db.updateTool(connectorId, 'delete_task', { highRisk: true })
+    const r = runner(askDelete)
+    await r.send('d1', 'apaga a 2')
+    await r.idle()
+    await r.decide(db.approvals()[0]!.id, 'approved', undefined, true)
+    await r.idle()
+    expect(db.agent('a1')!.autoApprove).toEqual([])
+  })
+
+  it('an agent without access asks for it; approving grants it and it goes on', async () => {
+    const r = runner((turn, tools) =>
+      tools.includes('pedir_acesso') && !turn.prompt.includes('liberou') ? { tool: 'pedir_acesso', args: { conector: 'Tarefas', nivel: 'read', motivo: 'pra ver as tarefas abertas' } } : null
+    )
+    await r.send('d1', 'quais tarefas estão abertas?')
+    await r.idle()
+    const [ap] = db.approvals()
+    expect(ap).toMatchObject({ tool: 'pedir_acesso', connectorName: 'Tarefas', args: { nivel: 'read' }, why: 'pra ver as tarefas abertas' })
+    await r.decide(ap!.id, 'approved')
+    await r.idle()
+    expect(db.agent('a1')!.grants[connectorId]).toBe('read')
+    expect(seen.turns.at(-1)!.prompt).toContain('Edu liberou o seu acesso ao Tarefas (ler)')
+    expect(seen.tools.at(-1)).toContain('tarefas__list_tasks')
+  })
+})
+
+describe('pausing and attributing work', () => {
+  it('"Pausar tudo": a message gets a note instead of a reply', async () => {
+    const r = runner(() => null)
+    r.setPaused(true)
+    await r.send('d1', 'oi')
+    await r.idle()
+    expect(agentMessages()).toHaveLength(0)
+    expect(db.messages().at(-1)!.text).toContain('Os agentes estão pausados')
+    r.setPaused(false)
+    await r.send('d1', 'oi de novo')
+    await r.idle()
+    expect(agentMessages()).toHaveLength(1)
+  })
+
+  it('a reply about an issue counts toward it, and so do the replies it hands off to', async () => {
+    db.saveAgent(agent('none'))
+    db.saveAgent({ ...agent('none'), id: 'a2', name: 'Theo', handle: 'theo' })
+    db.createConversation({ id: 'c1', kind: 'channel', name: 'eng', members: ['a1', 'a2'] })
+    const r = new Runner({
+      db,
+      engines: { claude: fakeEngine('claude', { delayMs: 1, reply: (t) => (t.prompt.includes('Theo · agente') ? 'feito' : '@theo dá uma olhada') }), codex: fakeEngine('codex') },
+      settings: async () => settings,
+      emit: () => {},
+      workDir: join(dir, 'work')
+    })
+    await r.send('c1', '@lia olha a OAB-65, o lembrete duplica')
+    await r.idle()
+    const work = db.costByWork(0)
+    expect(work).toEqual([expect.objectContaining({ work: 'OAB-65', replies: 2, agents: expect.arrayContaining(['a1', 'a2']) as string[] })])
+    expect(agentMessages().every((m) => m.run?.work === 'OAB-65')).toBe(true)
   })
 })

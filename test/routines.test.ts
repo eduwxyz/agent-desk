@@ -239,3 +239,15 @@ describe('routines', () => {
     expect(db.routines()).toHaveLength(MAX_AGENT_ROUTINES - 1)
   })
 })
+
+describe('quiet hours', () => {
+  it('cross midnight when they should', async () => {
+    const { inQuietHours } = await import('../src/shared/types')
+    const at = (h: number, m = 0): Date => new Date(2026, 9, 19, h, m)
+    expect(inQuietHours({ from: '22:00', to: '07:00' }, at(23))).toBe(true)
+    expect(inQuietHours({ from: '22:00', to: '07:00' }, at(6, 59))).toBe(true)
+    expect(inQuietHours({ from: '22:00', to: '07:00' }, at(7))).toBe(false)
+    expect(inQuietHours({ from: '12:00', to: '13:00' }, at(12, 30))).toBe(true)
+    expect(inQuietHours(undefined, at(3))).toBe(false)
+  })
+})

@@ -18,9 +18,10 @@ export function systemPrompt(opts: {
   web?: boolean
   routines?: Routine[] // its own, when it can schedule
   skills?: Skill[] // the active ones it follows, when it has skill tools
+  publish?: string // the GitHub repository it can push agent/* branches to, from this channel
   project?: { files: ContextFile[]; memories: Memory[] } // when the conversation is a project channel
 }): string {
-  const { agent, settings, conversation, peers, memories, canRemember, hasComputer, web, routines, skills, project } = opts
+  const { agent, settings, conversation, peers, memories, canRemember, hasComputer, web, routines, skills, publish, project } = opts
   const me = settings.workspaceName || 'o usuário'
   const where =
     conversation.kind === 'dm'
@@ -40,7 +41,11 @@ export function systemPrompt(opts: {
           [
             `Pastas do Mac de ${me} emprestadas pra você (são os arquivos de verdade, o que você muda aparece na hora no Mac):`,
             ...agent.folders.map((f) => `- ${PROJECTS_DIR}/${f.name}${f.readOnly ? ' (só leitura)' : ''}`),
-            `Nelas, mude só o que ${me} pediu e confira com os testes ou o build do projeto. Antes de mexer, olhe o git status; não apague, não reescreva o que não entendeu e não descarte mudanças de ${me}. node_modules e .venv aqui são do Linux, separados dos do Mac: instale à vontade. Não há credenciais no seu computador, então git push e deploy não funcionam: faça commit só se ${me} pedir e diga o que falta ${me} fazer.`
+            `Nelas, mude só o que ${me} pediu e confira com os testes ou o build do projeto. Antes de mexer, olhe o git status; não apague, não reescreva o que não entendeu e não descarte mudanças de ${me}. node_modules e .venv aqui são do Linux, separados dos do Mac: instale à vontade. ${
+              publish
+                ? `Não há credenciais no seu computador, mas o app publica no GitHub (${publish}) por você: faça commit numa branch agent/<assunto> e \`git push origin agent/<assunto>\` (só branches agent/* passam; main e as outras são recusadas). Depois peça a PR com abrir_pr: ${me} aprova e o app abre. Deploy continua com ${me}.`
+                : `Não há credenciais no seu computador, então git push e deploy não funcionam: faça commit só se ${me} pedir e diga o que falta ${me} fazer.`
+            }\``
           ].join('\n')
       ]
         .filter(Boolean)

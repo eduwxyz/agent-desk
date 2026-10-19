@@ -202,6 +202,10 @@ const MIGRATIONS = [
     at INTEGER NOT NULL
   );
   CREATE INDEX skill_versions_by_skill ON skill_versions (skill_id, at);
+  `,
+  `
+  ALTER TABLE agents ADD COLUMN auto_approve TEXT NOT NULL DEFAULT '[]';
+  ALTER TABLE receipts ADD COLUMN work TEXT;
   `
 ]
 
@@ -224,6 +228,11 @@ export class Db {
 
   close(): void {
     this.db.close()
+  }
+
+  // A consistent copy of the whole database, while it's in use.
+  backupTo(file: string): void {
+    this.db.exec(`VACUUM INTO '${file.replace(/'/g, "''")}'`)
   }
 
   private migrate(): void {
@@ -287,6 +296,7 @@ export class Db {
       memory: (str(r['memory_mode']) || 'auto') as MemoryMode,
       computer: r['computer'] === 1,
       web: r['web'] !== 0,
+      autoApprove: JSON.parse(str(r['auto_approve']) || '[]') as string[],
       folders: JSON.parse(str(r['folders']) || '[]') as LentFolder[],
       archived: r['archived'] === 1
     }
@@ -304,14 +314,14 @@ export class Db {
   saveAgent(a: Agent): void {
     this.db
       .prepare(
-        `INSERT INTO agents (id, name, handle, role, color, instructions, model, effort, limit_tokens, grants, memory_mode, computer, web, archived, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `INSERT INTO agents (id, name, handle, role, color, instructions, model, effort, limit_tokens, grants, memory_mode, computer, web, auto_approve, archived, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT (id) DO UPDATE SET name = excluded.name, handle = excluded.handle, role = excluded.role,
            color = excluded.color, instructions = excluded.instructions, model = excluded.model, effort = excluded.effort,
            limit_tokens = excluded.limit_tokens, grants = excluded.grants, memory_mode = excluded.memory_mode,
-           computer = excluded.computer, web = excluded.web, archived = excluded.archived`
+           computer = excluded.computer, web = excluded.web, auto_approve = excluded.auto_approve, archived = excluded.archived`
       )
-      .run(a.id, a.name, a.handle, a.role, a.color, a.instructions, a.modelId, a.effort, a.limit, JSON.stringify(a.grants), a.memory ?? 'auto', a.computer ? 1 : 0, a.web === false ? 0 : 1, a.archived ? 1 : 0, Date.now())
+      .run(a.id, a.name, a.handle, a.role, a.color, a.instructions, a.modelId, a.effort, a.limit, JSON.stringify(a.grants), a.memory ?? 'auto', a.computer ? 1 : 0, a.web === false ? 0 : 1, JSON.stringify(a.autoApprove ?? []), a.archived ? 1 : 0, Date.now())
   }
 
   // Kept apart from saveAgent: folders change only after the core checks them.
@@ -452,13 +462,25 @@ export class Db {
 
   // ---------- receipts ----------
 
-  addReceipt(r: Receipt & { messageId: string; agentId: string; engine: string; at: number }): void {
+  addReceipt(r: Receipt & { messageId: string; agentId: string; engine: string; at: number; work?: string }): void {
     this.db
       .prepare(
-        `INSERT INTO receipts (message_id, agent_id, engine, model, input_tokens, cache_read_tokens, output_tokens, ms, api_cost_usd, at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO receipts (message_id, agent_id, engine, model, input_tokens, cache_read_tokens, output_tokens, ms, api_cost_usd, at, work)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
-      .run(r.messageId, r.agentId, r.engine, r.model, r.inputTokens, r.cacheReadTokens, r.outputTokens, r.ms, r.apiCostUsd ?? null, r.at)
+      .run(r.messageId, r.agentId, r.engine, r.model, r.inputTokens, r.cacheReadTokens, r.outputTokens, r.ms, r.apiCostUsd ?? null, r.at, r.work ?? null)
+  }
+
+  // Counted tokens per piece of work (an issue like OAB-65) since `since`, biggest first.
+  costByWork(since: number): { work: string; tokens: number; replies: number; agents: string[]; last: number }[] {
+    return (
+      this.db
+        .prepare(
+          `SELECT work, ROUND(SUM(${COUNTED})) AS tokens, COUNT(DISTINCT message_id) AS replies, GROUP_CONCAT(DISTINCT agent_id) AS agents, MAX(at) AS last
+           FROM receipts WHERE work IS NOT NULL AND at >= ? GROUP BY work ORDER BY tokens DESC`
+        )
+        .all(since) as Row[]
+    ).map((r) => ({ work: str(r['work']), tokens: Number(r['tokens']), replies: Number(r['replies']), agents: str(r['agents']).split(','), last: Number(r['last']) }))
   }
 
   // ---------- connectors ----------

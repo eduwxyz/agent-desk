@@ -2089,3 +2089,131 @@ table.csv th {
 .routine-test {
   margin-bottom: 12px;
 }
+
+/* ---------- pause, quota ---------- */
+.icon-btn.is-paused {
+  color: var(--warn, #c98a00);
+}
+.paused-banner {
+  margin: 0 10px 8px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--warn-soft, rgba(201, 138, 0, 0.12));
+  color: var(--text);
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.quota {
+  margin-bottom: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.quota__row {
+  display: grid;
+  grid-template-columns: 110px 1fr 44px 150px;
+  align-items: center;
+  gap: 10px;
+}
+.quota__bar {
+  height: 8px;
+  border-radius: 99px;
+  background: var(--border);
+  overflow: hidden;
+}
+.quota__bar i {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+}
+.quota__bar i.is-high {
+  background: var(--danger);
+}
+.always {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+}
+.always__rule {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.always__x {
+  border: 0;
+  background: none;
+  color: inherit;
+  padding: 0;
+  display: grid;
+  place-items: center;
+}
+.quiet {
+  margin-top: 6px;
+}
+.quiet input {
+  width: auto;
+}
+
+/* ---------- report ---------- */
+.report-agents {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 12px;
+  margin-bottom: 20px;
+}
+.report-agent {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.report-agent .link {
+  gap: 8px;
+}
+.report-agent__big strong {
+  font-size: 28px;
+  margin-right: 8px;
+}
+.report-agent__weeks {
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+  height: 46px;
+}
+.report-agent__week {
+  flex: 1;
+  height: 100%;
+  display: flex;
+  align-items: flex-end;
+}
+.report-agent__week i {
+  display: flex;
+  align-items: flex-end;
+  width: 100%;
+  min-height: 2px;
+  border-radius: 3px;
+  background: var(--border);
+  overflow: hidden;
+}
+.report-agent__week b {
+  display: block;
+  width: 100%;
+  background: var(--ok);
+}
+.report-agent__facts {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 4px 12px;
+  margin: 0;
+}
+.report-agent__facts dt {
+  color: var(--text-2);
+}
+.report-agent__facts dd {
+  margin: 0;
+  text-align: right;
+}

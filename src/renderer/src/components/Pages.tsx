@@ -24,6 +24,11 @@ import {
   setJevKey,
   setTelegramToken,
   unpairTelegram,
+  setGithubToken,
+  exportTeam,
+  importTeam,
+  backupNow,
+  openBackups,
   type TelegramInfo,
   useStore,
   EFFORTS,
@@ -264,8 +269,32 @@ export function AgentPage({ id }: { id?: string }): ReactNode {
               })}
             </div>
             <p className="hint">
-              <Icon name="shield" size={13} /> Ferramentas sensíveis (merge, deploy, apagar, enviar) sempre viram pedido de aprovação no chat.
+              <Icon name="shield" size={13} /> Ferramentas sensíveis (merge, deploy, apagar, enviar) viram pedido de aprovação no chat, a não ser as que você marcou como "sempre permitir".
             </p>
+            {!isNew && (draft.autoApprove?.length ?? 0) > 0 && (
+              <div className="always">
+                <span className="small muted">Sempre permitido, sem pedir:</span>
+                {draft.autoApprove!.map((rule) => {
+                  const [cid, tool] = rule.split(':')
+                  return (
+                    <span key={rule} className="chip is-on always__rule">
+                      {connectors.find((c) => c.id === cid)?.name ?? 'conector'} · {tool}
+                      <button
+                        className="always__x"
+                        title="Voltar a pedir aprovação"
+                        onClick={() => {
+                          const autoApprove = draft.autoApprove!.filter((r) => r !== rule)
+                          setDraft((d) => ({ ...d, autoApprove }))
+                          patchAgent(draft.id, { autoApprove })
+                        }}
+                      >
+                        <Icon name="x" size={11} />
+                      </button>
+                    </span>
+                  )
+                })}
+              </div>
+            )}
           </Card>
 
           <Card title="Web" lead={`Pesquisa e lê páginas com a ferramenta do próprio Claude Code ou Codex, na sua assinatura. Cada busca aparece nos passos da resposta.${isNew ? '' : ' Muda na hora, sem precisar salvar.'}`}>
@@ -658,6 +687,37 @@ function HistoryRow({ id }: { id: string }): ReactNode {
 
 // ---------- Usage ----------
 
+// The Claude subscription's own windows, as the last reply reported them (the Codex CLI doesn't tell).
+function Quota(): ReactNode {
+  const q = useStore((s) => s.settings.quota)
+  if (!q || (!q.fiveHour && !q.sevenDay)) return null
+  const resets = (at: number): string => {
+    const d = new Date(at)
+    return d.toDateString() === new Date().toDateString() ? d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : d.toLocaleDateString('pt-BR', { weekday: 'short', day: '2-digit', month: '2-digit' }).replace('.', '')
+  }
+  const row = (label: string, w?: { utilization: number; resetsAt: number }): ReactNode =>
+    w && (
+      <div className="quota__row">
+        <span className="small">{label}</span>
+        <div className="quota__bar">
+          <i style={{ width: `${Math.min(100, w.utilization * 100)}%` }} className={w.utilization > 0.8 ? 'is-high' : ''} />
+        </div>
+        <span className="small mono">{Math.round(w.utilization * 100)}%</span>
+        <span className="small muted">volta a zero {resets(w.resetsAt)}</span>
+      </div>
+    )
+  return (
+    <div className="card quota">
+      <div className="row row--center">
+        <strong className="small">Sua assinatura do Claude</strong>
+        <span className="muted small">segundo o Claude Code, {time(q.at)} · o Codex não informa</span>
+      </div>
+      {row('Janela de 5 h', q.fiveHour)}
+      {row('Semana', q.sevenDay)}
+    </div>
+  )
+}
+
 export function UsagePage(): ReactNode {
   const agents = useStore((s) => s.agents.filter((a) => !a.archived))
   const messages = useStore((s) => s.messages.filter((m) => m.run?.receipt))
@@ -667,6 +727,7 @@ export function UsagePage(): ReactNode {
 
   return (
     <Page title="Uso e limites" subtitle="Tudo roda nas suas assinaturas. Cada turno gera um recibo, e o limite de cada agente é conferido antes do turno, não depois.">
+      <Quota />
       <div className="kpis">
         <div className="kpi">
           <span className="muted small">Tokens em {month}</span>
@@ -1009,6 +1070,97 @@ export function Toggle({ on, onChange }: { on: boolean; onChange: (v: boolean) =
 
 // ---------- Settings ----------
 
+// Issue to PR (spec §22): the token the app pushes agent/* branches and opens PRs with.
+function GithubCard({ info }: { info?: { user?: string; error?: string } }): ReactNode {
+  const [token, setToken] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const save = (value: string | null): void => {
+    setBusy(true)
+    setError('')
+    setGithubToken(value)
+      .then(() => setToken(''))
+      .catch((e: unknown) => setError(e instanceof Error ? e.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '') : String(e)))
+      .finally(() => setBusy(false))
+  }
+  return (
+    <Card
+      title="GitHub (push e PR)"
+      lead="Pros agentes publicarem o trabalho dos projetos: o git do computador deles passa pelo app, que põe o token fora do computador e só aceita push em branches agent/*. Abrir PR é um pedido de aprovação."
+    >
+      {info?.user ? (
+        <div className="row row--center">
+          <span className="tag tag--ok">Conectado</span>
+          <span className="small grow">
+            como <strong>{info.user}</strong>
+          </span>
+          <button className="btn btn--sm btn--ghost" onClick={() => save(null)}>
+            Remover token
+          </button>
+        </div>
+      ) : (
+        <>
+          <p className="small">
+            Crie um token fine-grained em github.com → Settings → Developer settings → <strong>Fine-grained tokens</strong>, só com os repositórios dos projetos e as permissões <strong>Contents: read and write</strong> e <strong>Pull requests: read and write</strong>.
+          </p>
+          <div className="row">
+            <input className="grow" type="password" value={token} placeholder="github_pat_…" onChange={(e) => setToken(e.target.value)} />
+            <button className="btn" disabled={busy || !token.trim()} onClick={() => save(token)}>
+              {busy ? 'Conferindo…' : 'Salvar'}
+            </button>
+          </div>
+        </>
+      )}
+      {(error || info?.error) && <p className="note note--error">{error || info?.error}</p>}
+      <p className="hint">
+        <Icon name="shield" size={13} /> O token fica no cofre do Mac e nunca entra no computador dos agentes. main e as outras branches são recusadas no caminho.
+      </p>
+    </Card>
+  )
+}
+
+// The team as a file, and backups of everything.
+function TeamCard(): ReactNode {
+  const [note, setNote] = useState('')
+  const download = (): void => {
+    void exportTeam().then((md) => {
+      const a = document.createElement('a')
+      a.href = URL.createObjectURL(new Blob([md], { type: 'text/markdown' }))
+      a.download = `time-agent-desk-${new Date().toISOString().slice(0, 10)}.md`
+      a.click()
+      URL.revokeObjectURL(a.href)
+    })
+  }
+  const upload = (file?: File): void => {
+    if (!file) return
+    void file
+      .text()
+      .then(importTeam)
+      .then(setNote, (e: unknown) => setNote(e instanceof Error ? e.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '') : String(e)))
+  }
+  return (
+    <Card title="Time e backup" lead="O time num arquivo .md (agentes, skills, canais e rotinas, sem credenciais nem conversas), pra guardar ou levar pra outro Mac. E uma cópia de tudo uma vez por dia (as últimas 7).">
+      <div className="row">
+        <button className="btn btn--sm" onClick={download}>
+          Exportar time
+        </button>
+        <label className="btn btn--sm">
+          Importar time…
+          <input type="file" accept=".md,text/markdown" hidden onChange={(e) => upload(e.target.files?.[0])} />
+        </label>
+        <span className="grow" />
+        <button className="btn btn--sm" onClick={() => void backupNow().then((f) => setNote(`Backup feito: ${f.split('/').pop()}`))}>
+          Fazer backup agora
+        </button>
+        <button className="btn btn--sm btn--ghost" onClick={openBackups}>
+          Abrir pasta
+        </button>
+      </div>
+      {note && <p className="small muted">{note}</p>}
+    </Card>
+  )
+}
+
 // The phone (spec §19): a Telegram bot of the user's own, paired with a code.
 function PhoneCard({ info }: { info?: TelegramInfo }): ReactNode {
   const [token, setToken] = useState('')
@@ -1220,7 +1372,27 @@ export function SettingsPage(): ReactNode {
             </div>
             <Toggle on={!!settings.openAtLogin && packaged} onChange={(v) => packaged && updateSettings({ openAtLogin: v })} />
           </div>
+          <div className="key-row">
+            <Icon name="moon" />
+            <div className="grow">
+              <strong>Horário de silêncio</strong>
+              <p className="muted small">Rotinas e gatilhos esperam e rodam quando ele acaba (como atrasados). O que você mandar continua sendo respondido.</p>
+              {settings.quietHours && (
+                <div className="row row--center quiet">
+                  <span className="small">das</span>
+                  <input type="time" value={settings.quietHours.from} onChange={(e) => updateSettings({ quietHours: { ...settings.quietHours!, from: e.target.value } })} />
+                  <span className="small">às</span>
+                  <input type="time" value={settings.quietHours.to} onChange={(e) => updateSettings({ quietHours: { ...settings.quietHours!, to: e.target.value } })} />
+                </div>
+              )}
+            </div>
+            <Toggle on={!!settings.quietHours} onChange={(v) => updateSettings({ quietHours: v ? { from: '22:00', to: '07:00' } : null })} />
+          </div>
         </Card>
+
+        <GithubCard info={settings.github} />
+
+        <TeamCard />
 
         <Card title="Limites">
           <div className="grid2">

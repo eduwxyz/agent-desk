@@ -16,6 +16,7 @@ import {
   removeRoutine,
   retryRun,
   continueRun,
+  ACCESS_REQUEST,
   countedTokens,
   sendMessage,
   stopRun,
@@ -517,7 +518,19 @@ export function ApprovalCard({ approval, compact }: { approval: Approval; compac
         {approval.highRisk && <span className="tag tag--danger">alto risco</span>}
       </div>
       <div className="approval__title">
-        {agent?.name ?? 'Agente'} quer usar <strong>{approval.tool.replace(/_/g, ' ')}</strong> no {approval.connectorName}
+        {approval.tool === ACCESS_REQUEST ? (
+          <>
+            {agent?.name ?? 'Agente'} pede acesso ao <strong>{approval.connectorName}</strong>: {approval.args['nivel'] === 'read_write' ? 'ler e escrever' : 'ler'}
+          </>
+        ) : approval.tool === 'abrir_pr' ? (
+          <>
+            {agent?.name ?? 'Agente'} quer abrir uma <strong>pull request</strong> em {String(approval.args['repo'])}
+          </>
+        ) : (
+          <>
+            {agent?.name ?? 'Agente'} quer usar <strong>{approval.tool.replace(/_/g, ' ')}</strong> no {approval.connectorName}
+          </>
+        )}
       </div>
       {approval.why && <p className="approval__why">{approval.why}</p>}
       <div className="approval__call">
@@ -575,9 +588,16 @@ export function ApprovalCard({ approval, compact }: { approval: Approval; compac
               <span>{hold > 0 ? 'Segure…' : 'Segure para aprovar'}</span>
             </button>
           ) : (
-            <button className="btn btn--primary" onClick={() => decideApproval(approval.id, 'approved')}>
-              Aprovar
-            </button>
+            <>
+              <button className="btn btn--primary" onClick={() => decideApproval(approval.id, 'approved')}>
+                Aprovar
+              </button>
+              {approval.tool !== ACCESS_REQUEST && approval.tool !== 'abrir_pr' && (
+                <button className="btn" title={`Daqui pra frente ${agent?.name ?? 'o agente'} usa ${approval.tool} no ${approval.connectorName} sem pedir. Dá pra tirar na página dele.`} onClick={() => decideApproval(approval.id, 'approved', undefined, true)}>
+                  Aprovar e sempre permitir
+                </button>
+              )}
+            </>
           )}
           <button className="btn" onClick={() => setRefusing(true)}>
             Recusar

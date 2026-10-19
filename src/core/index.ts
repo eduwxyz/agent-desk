@@ -8,7 +8,7 @@ import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import type { MessagePortMain } from 'electron'
 import type { Api, CoreEvent, Method, Request, Wire } from '../shared/rpc'
-import { ENGINES, WEBHOOK_PORT, type Agent, type EngineId, type EngineStatus, type Settings } from '../shared/types'
+import { ENGINES, inQuietHours, WEBHOOK_PORT, type Agent, type Message, type EngineId, type EngineStatus, type Settings } from '../shared/types'
 import { Db } from './db'
 import { claudeEngine } from './engines/claude'
 import { codexEngine } from './engines/codex'
@@ -19,7 +19,10 @@ import { ConnectorManager } from './connectors'
 import { Gateway } from './gateway'
 import { createServer } from 'node:http'
 import { checkJevKey, JEV_MODEL, JEV_SECRET } from './jev'
+import { GitHub } from './github'
+import { report } from './report'
 import { Skills } from './skills'
+import { backup, backupIfDue, exportTeam, importTeam } from './team'
 import { Telegram } from './telegram'
 import { mainCipher, plainCipher, Secrets } from './secrets'
 import { checkFolder, Computers, folderName, type Shooter } from './computer'
@@ -63,7 +66,9 @@ async function detect(): Promise<void> {
 const gateway = new Gateway()
 const ready = Promise.all([gateway.start(), (fake ? Promise.resolve() : adoptLoginShellPath()).then(detect)])
 
-const settings = (): Settings => ({ ...db.getSettings(DEFAULTS), engines, jevKey: db.getSecret(JEV_SECRET) !== undefined, telegram: telegram?.info() })
+const settings = (): Settings => ({ ...db.getSettings(DEFAULTS), engines, jevKey: db.getSecret(JEV_SECRET) !== undefined, telegram: telegram?.info(), github: githubInfo() })
+// github is made further down; settings can be asked for before.
+const githubInfo = (): Settings['github'] => githubRef?.info()
 
 const engineImpls: Record<EngineId, Engine> = fake
   ? { claude: fakeEngine('claude'), codex: fakeEngine('codex') }
@@ -80,6 +85,7 @@ function emit(event: CoreEvent): void {
 
 // The phone gets each new approval and question as it happens (spec §19).
 let telegram: Telegram | undefined
+let githubRef: GitHub | undefined
 const sentToPhone = new Set<string>()
 function toPhone(e: CoreEvent): void {
   if (!telegram) return
@@ -145,13 +151,28 @@ gateway.route('/oauth/callback', async (url) => {
 
 const memory = new Memories({ db, engines: engineImpls, settings: () => ready.then(settings), emit, workDir: join(dataDir, 'agents') })
 
-const computers = new Computers({ db, dataDir, emit, shoot })
+// Issue to PR: the GitHub proxy agents' computers push through (spec §22).
+const github: GitHub = new GitHub({
+  secrets,
+  db,
+  post: (conversationId, text) => {
+    const m: Message = { id: randomUUID(), conversationId, author: { kind: 'system' }, text, at: Date.now() }
+    db.saveMessage(m)
+    emit({ type: 'message', message: m })
+  },
+  changed: () => emit({ type: 'settings', settings: settings() })
+})
+
+githubRef = github
+const computers = new Computers({ db, dataDir, emit, shoot, gitRemote: (agentId) => github.gitRemote(agentId) })
+const backups = join(dataDir, 'backups')
 
 // The runner runs routines, and agents schedule routines through the runner's tools.
 const routines = new Routines({
   db,
   runner: { runRoutine: (r, when) => runner.runRoutine(r, when) },
   connectors: { call: (id, tool, args) => connectors.call(id, tool, args), list: () => connectors.list() },
+  blocked: () => !!settings().paused || inQuietHours(settings().quietHours),
   emit,
   notify: notifyAll
 })
@@ -173,8 +194,14 @@ const runner = new Runner({
   // Approvals reach the phone with their buttons, through toPhone.
   notify: (title, body, conversationId, kind) => (kind === 'approval' ? toMain({ type: 'notify', title, body, conversationId }) : notifyAll(title, body, conversationId)),
   jev: { key: () => secrets.get(JEV_SECRET) },
-  onBusy: (busy) => toMain({ type: 'busy', busy })
+  github,
+  onBusy: (busy) => toMain({ type: 'busy', busy }),
+  onQuota: (quota) => {
+    db.setSettings({ quota })
+    emit({ type: 'settings', settings: settings() })
+  }
 })
+runner.setPaused(!!settings().paused)
 
 telegram = new Telegram({
   secrets,
@@ -211,10 +238,22 @@ void ready.then(async () => {
   await runner.expireApprovals()
   setInterval(() => void runner.expireApprovals(), 60_000).unref()
   routines.start()
+  await github.start()
   if (!fake) {
     hooks.listen(WEBHOOK_PORT, '127.0.0.1')
+    github.listen()
     void telegram?.start()
   }
+  // A copy of the database once a day, the last 7 kept.
+  const daily = (): void => {
+    try {
+      backupIfDue(db, backups)
+    } catch (e) {
+      console.error('[backup]', e)
+    }
+  }
+  daily()
+  setInterval(daily, 3_600_000).unref()
 })
 toMain({ type: 'login_item', open: !!settings().openAtLogin })
 
@@ -306,6 +345,22 @@ const api: Api = {
   checkTrigger: ({ trigger }) => routines.preview(trigger),
 
   setTelegramToken: ({ token }) => telegram!.setToken(token),
+  setGithubToken: ({ token }) => github.setToken(token),
+  exportTeam: () => exportTeam(db),
+  importTeam: ({ text }) => {
+    const r = importTeam(db, text, settings().defaultLimit)
+    for (const a of db.agents()) emit({ type: 'agent', agent: a })
+    emitConversations()
+    for (const k of db.skills()) emit({ type: 'skill', skill: k })
+    for (const r2 of db.routines()) emit({ type: 'routine', routine: r2 })
+    return r
+  },
+  backupNow: () => backup(db, backups),
+  openBackups: () => {
+    mkdirSync(backups, { recursive: true })
+    toMain({ type: 'open_path', path: backups })
+  },
+  report: () => report(db),
   unpairTelegram: () => void telegram?.unpair(),
 
   // Checked with TypeSafe before it's saved; null removes it.
@@ -317,8 +372,9 @@ const api: Api = {
     emit({ type: 'settings', settings: settings() })
   },
 
-  updateSettings: ({ patch: { jevKey: _computed, ...patch } }) => {
+  updateSettings: ({ patch: { jevKey: _computed, telegram: _phone, ...patch } }) => {
     db.setSettings(patch)
+    if (patch.paused !== undefined) runner.setPaused(patch.paused)
     if (patch.openAtLogin !== undefined) toMain({ type: 'login_item', open: patch.openAtLogin })
     emit({ type: 'settings', settings: settings() })
   },
@@ -330,7 +386,7 @@ const api: Api = {
   reconnectConnector: ({ id }) => void connectors.connect(id),
   authorizeConnector: ({ id }) => void connectors.authorize(id),
   updateTool: ({ connectorId, name, patch }) => connectors.updateTool(connectorId, name, patch),
-  decideApproval: ({ id, decision, reason }) => void runner.decide(id, decision, reason?.trim() || undefined),
+  decideApproval: ({ id, decision, reason, always }) => void runner.decide(id, decision, reason?.trim() || undefined, always),
 
   addMemory: ({ scope, text }) => memory.add(scope, text),
   editMemory: ({ id, text }) => memory.edit(id, text),
