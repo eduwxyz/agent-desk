@@ -238,7 +238,9 @@ void ready.then(async () => {
   await runner.expireApprovals()
   setInterval(() => void runner.expireApprovals(), 60_000).unref()
   routines.start()
-  await github.start()
+  // Nothing here waits on the keychain: the first use after an update can be a
+  // macOS prompt that stays open until someone answers it.
+  void github.start().catch((e: unknown) => console.error('[github]', e))
   if (!fake) {
     hooks.listen(WEBHOOK_PORT, '127.0.0.1')
     github.listen()
