@@ -75,3 +75,13 @@ describe('the subscription quota', () => {
     expect(ev).toMatchObject({ type: 'quota', quota: { fiveHour: { utilization: 0.12, resetsAt: 1792374000_000 }, sevenDay: { utilization: 0.13 } } })
   })
 })
+
+describe('the starter team', () => {
+  it('comes only with a new database, not after someone deletes every agent', () => {
+    const file = join(mkdtempSync(join(tmpdir(), 'ad-seed-')), 'test.db')
+    const first = new Db(file)
+    expect(first.created).toBe(true)
+    first.close()
+    expect(new Db(file).created).toBe(false)
+  })
+})

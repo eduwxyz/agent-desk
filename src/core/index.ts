@@ -39,7 +39,7 @@ mkdirSync(dataDir, { recursive: true })
 const db = new Db(join(dataDir, 'agent-desk.db'))
 const codexHome = join(dataDir, 'codex-home')
 mkdirSync(join(codexHome, '.codex'), { recursive: true })
-if (db.isEmpty()) seed(db)
+if (db.created) seed(db)
 const interrupted = db.interruptStaleRuns()
 if (interrupted) console.log(`[core] ${interrupted} run(s) marked as interrupted`)
 

@@ -219,6 +219,9 @@ export const monthStart = (now = new Date()): number => new Date(now.getFullYear
 
 export class Db {
   private db: DatabaseSync
+  // The file was new: the first run, when the starter team goes in. Not merely
+  // "no agents", since someone may have deleted them all.
+  created = false
 
   constructor(file: string) {
     this.db = new DatabaseSync(file)
@@ -237,6 +240,7 @@ export class Db {
 
   private migrate(): void {
     const { user_version } = this.db.prepare('PRAGMA user_version').get() as { user_version: number }
+    this.created = user_version === 0
     for (let v = user_version; v < MIGRATIONS.length; v++) {
       this.tx(() => {
         this.db.exec(MIGRATIONS[v]!)
@@ -257,10 +261,6 @@ export class Db {
       this.db.exec('ROLLBACK')
       throw e
     }
-  }
-
-  isEmpty(): boolean {
-    return !this.db.prepare('SELECT 1 FROM agents LIMIT 1').get()
   }
 
   // ---------- settings ----------
