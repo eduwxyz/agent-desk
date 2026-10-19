@@ -14,6 +14,7 @@ export function fakeEngine(id: Engine['id'], opts: { delayMs?: number; reply?: (
     async *run(turn): AsyncIterable<EngineEvent> {
       const last = lastMessage(turn.prompt)
       let reply: string
+      let spend = 0 // "gaste N tokens": a reply that costs that much, to see the budget pause
       if (turn.system === ROUTER_SYSTEM) {
         reply = JSON.stringify(fakeRoute(turn.prompt))
       } else if (turn.system === MEMORY_SYSTEM) {
@@ -46,6 +47,13 @@ export function fakeEngine(id: Engine['id'], opts: { delayMs?: number; reply?: (
         const [, nome, horario, once, pedido] = /agend\w* `([^`]+)` às (\d{1,2}:\d{2})( uma vez)?: (.+)/i.exec(last)!
         const r = await callTool(turn.mcpUrl, 'agendar_rotina', { nome, horario, pedido, uma_vez: !!once })
         reply = textOf(r)
+      } else if (turn.mcpUrl && /proponha a skill `([^`]+)` \(quando: ([^)]+)\): (.+)/is.test(last)) {
+        const [, nome, quando_usar, receita] = /proponha a skill `([^`]+)` \(quando: ([^)]+)\): (.+)/is.exec(last)!
+        const r = await callTool(turn.mcpUrl, 'propor_skill', { nome, quando_usar, receita, motivo: 'Faço isso sempre do mesmo jeito.' })
+        reply = textOf(r)
+      } else if (/gaste (\d+) tokens/i.test(last)) {
+        spend = Number(/gaste (\d+) tokens/i.exec(last)![1])
+        reply = 'Instalei o Swift e li o módulo de sorteio. Falta rodar os testes do Core e conferir o filtro de questões recentes.'
       } else if (turn.mcpUrl && /lembr[ae] que (.+)/i.test(last)) {
         const texto = /lembr[ae] que (.+)/i.exec(last)![1]!.trim()
         await callTool(turn.mcpUrl, 'lembrar', { texto, sobre: 'usuario' })
@@ -58,7 +66,7 @@ export function fakeEngine(id: Engine['id'], opts: { delayMs?: number; reply?: (
       }
 
       const inputTokens = Math.ceil((turn.system.length + turn.prompt.length) / 4)
-      yield { type: 'progress', tokens: inputTokens }
+      yield { type: 'progress', tokens: inputTokens + spend }
       let text = ''
       for (const word of reply.split(/(\s+)/)) {
         if (turn.signal.aborted) return

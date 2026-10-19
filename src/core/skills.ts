@@ -142,7 +142,7 @@ export class Skills {
     if (!approve) return void this.drop(id)
     const target = p.replaces ? this.deps.db.skill(p.replaces) : undefined
     if (target?.state === 'active') {
-      this.keep(target, 'me')
+      this.keep(target, p.proposedBy ?? 'me') // replaced by that agent's proposal
       this.drop(id)
       return this.store({ ...target, description: p.description, body: p.body, updatedAt: this.now() })
     }

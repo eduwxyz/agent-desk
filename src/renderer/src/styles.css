@@ -2082,3 +2082,10 @@ table.csv th {
   flex-direction: column;
   gap: 4px;
 }
+.hint--text {
+  display: block;
+  line-height: 1.5;
+}
+.routine-test {
+  margin-bottom: 12px;
+}

@@ -156,7 +156,7 @@ function History({ skill }: { skill: Skill }): ReactNode {
         <div key={v.id}>
           <div className="row row--center small">
             <span className="grow">
-              Antes de {time(v.at)} <span className="muted">· mudada por {who(v.by)}</span>
+              Antes de {time(v.at)} <span className="muted">· {v.by === 'me' ? `mudada por ${who(v.by)}` : `mudada por uma proposta de ${who(v.by)}`}</span>
             </span>
             <button className="link small" onClick={() => setShowing(showing === v.id ? null : v.id)}>
               {showing === v.id ? 'esconder' : 'o que mudou'}
@@ -220,9 +220,10 @@ function Diff({ before, after }: { before: string; after: string }): ReactNode {
   let i = 0
   let j = 0
   while (i < n || j < m) {
+    // Removed lines before the ones that replace them.
     if (i < n && j < m && a[i] === b[j]) lines.push({ kind: ' ', text: a[i++]! }), j++
-    else if (j < m && (i === n || lcs[i]![j + 1]! >= lcs[i + 1]![j]!)) lines.push({ kind: '+', text: b[j++]! })
-    else lines.push({ kind: '-', text: a[i++]! })
+    else if (i < n && (j === m || lcs[i + 1]![j]! >= lcs[i]![j + 1]!)) lines.push({ kind: '-', text: a[i++]! })
+    else lines.push({ kind: '+', text: b[j++]! })
   }
   return (
     <pre className="diff">

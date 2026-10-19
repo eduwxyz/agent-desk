@@ -366,7 +366,7 @@ function RoutineForm({ draft, onChange, onClose }: { draft: Draft; onChange: (d:
                   </select>
                 </Field>
               </div>
-              <div className="row row--center">
+              <div className="row row--center routine-test">
                 <button type="button" className="btn btn--sm" disabled={!!argsError || !t.tool} onClick={test}>
                   Testar agora
                 </button>
@@ -375,9 +375,8 @@ function RoutineForm({ draft, onChange, onClose }: { draft: Draft; onChange: (d:
             </>
           ))}
         {t?.kind === 'webhook' && (
-          <p className="hint">
-            Depois de salvar, a rotina ganha um endereço no seu Mac (só o próprio Mac acessa). Um script, um hook do git ou uma fase de build do Xcode chama com{' '}
-            <code>curl -d "o que aconteceu" …</code>, e o texto enviado chega pro agente.
+          <p className="hint hint--text">
+            Depois de salvar, a rotina ganha um endereço no seu Mac (só o próprio Mac acessa). Um script, um hook do git ou uma fase de build do Xcode chama com <code>curl -d "o que aconteceu" …</code>, e o texto enviado chega pro agente.
           </p>
         )}
         {!t && (
