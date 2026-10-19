@@ -206,6 +206,9 @@ const MIGRATIONS = [
   `
   ALTER TABLE agents ADD COLUMN auto_approve TEXT NOT NULL DEFAULT '[]';
   ALTER TABLE receipts ADD COLUMN work TEXT;
+  `,
+  `
+  ALTER TABLE agents ADD COLUMN computer_kind TEXT NOT NULL DEFAULT 'linux';
   `
 ]
 
@@ -295,6 +298,7 @@ export class Db {
       grants: JSON.parse(str(r['grants']) || '{}') as Agent['grants'],
       memory: (str(r['memory_mode']) || 'auto') as MemoryMode,
       computer: r['computer'] === 1,
+      computerKind: str(r['computer_kind']) === 'mac' ? 'mac' : 'linux',
       web: r['web'] !== 0,
       autoApprove: JSON.parse(str(r['auto_approve']) || '[]') as string[],
       folders: JSON.parse(str(r['folders']) || '[]') as LentFolder[],
@@ -314,14 +318,14 @@ export class Db {
   saveAgent(a: Agent): void {
     this.db
       .prepare(
-        `INSERT INTO agents (id, name, handle, role, color, instructions, model, effort, limit_tokens, grants, memory_mode, computer, web, auto_approve, archived, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `INSERT INTO agents (id, name, handle, role, color, instructions, model, effort, limit_tokens, grants, memory_mode, computer, computer_kind, web, auto_approve, archived, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT (id) DO UPDATE SET name = excluded.name, handle = excluded.handle, role = excluded.role,
            color = excluded.color, instructions = excluded.instructions, model = excluded.model, effort = excluded.effort,
            limit_tokens = excluded.limit_tokens, grants = excluded.grants, memory_mode = excluded.memory_mode,
-           computer = excluded.computer, web = excluded.web, auto_approve = excluded.auto_approve, archived = excluded.archived`
+           computer = excluded.computer, computer_kind = excluded.computer_kind, web = excluded.web, auto_approve = excluded.auto_approve, archived = excluded.archived`
       )
-      .run(a.id, a.name, a.handle, a.role, a.color, a.instructions, a.modelId, a.effort, a.limit, JSON.stringify(a.grants), a.memory ?? 'auto', a.computer ? 1 : 0, a.web === false ? 0 : 1, JSON.stringify(a.autoApprove ?? []), a.archived ? 1 : 0, Date.now())
+      .run(a.id, a.name, a.handle, a.role, a.color, a.instructions, a.modelId, a.effort, a.limit, JSON.stringify(a.grants), a.memory ?? 'auto', a.computer ? 1 : 0, a.computerKind === 'mac' ? 'mac' : 'linux', a.web === false ? 0 : 1, JSON.stringify(a.autoApprove ?? []), a.archived ? 1 : 0, Date.now())
   }
 
   // Kept apart from saveAgent: folders change only after the core checks them.

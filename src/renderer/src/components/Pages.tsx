@@ -313,7 +313,17 @@ export function AgentPage({ id }: { id?: string }): ReactNode {
             </div>
           </Card>
 
-          {!isNew && <ComputerCard agentId={draft.id} on={draft.computer} onToggle={(on) => (setDraft((d) => ({ ...d, computer: on })), patchAgent(draft.id, { computer: on }))} />}
+          {!isNew && (
+            <ComputerCard
+              agentId={draft.id}
+              kind={draft.computer ? (draft.computerKind ?? 'linux') : 'none'}
+              onChange={(k) => {
+                const patch = { computer: k !== 'none', computerKind: k === 'none' ? (draft.computerKind ?? 'linux') : k }
+                setDraft((d) => ({ ...d, ...patch }))
+                patchAgent(draft.id, patch)
+              }}
+            />
+          )}
 
           <Card
             title="Memória"
@@ -450,22 +460,82 @@ const COMPUTER_STATE: Record<string, { label: string; tone: string }> = {
   error: { label: 'com problema', tone: 'tag--danger' }
 }
 
-function ComputerCard({ agentId, on, onToggle }: { agentId: string; on: boolean; onToggle: (on: boolean) => void }): ReactNode {
+type ComputerChoice = 'none' | 'linux' | 'mac'
+const COMPUTER_CHOICES: { value: ComputerChoice; label: string }[] = [
+  { value: 'none', label: 'Nenhum' },
+  { value: 'linux', label: 'Linux isolado' },
+  { value: 'mac', label: 'Este Mac' }
+]
+
+function ComputerCard({ agentId, kind, onChange }: { agentId: string; kind: ComputerChoice; onChange: (k: ComputerChoice) => void }): ReactNode {
   const info = useStore((s) => computerOf(s, agentId))
   const [confirmErase, setConfirmErase] = useState(false)
+  const [confirmMac, setConfirmMac] = useState(false)
   useEffect(() => computerAction(agentId, 'refresh'), [agentId])
+  const on = kind === 'linux'
   const state = on ? (info && info.state !== 'off' ? info.state : 'stopped') : 'off'
   const st = COMPUTER_STATE[state]!
 
   return (
-    <Card title="Computador" lead="Um Linux só dele, isolado do seu Mac, onde instala, cria, roda e testa qualquer coisa sem pedir. O que sai de lá (push, e-mail, deploy) continua passando pelos conectores.">
+    <Card
+      title="Computador"
+      lead="Onde ele roda comandos, instala, cria e testa. O Linux é uma máquina só dele, isolada do seu Mac e sem credenciais. No seu Mac, ele usa o que você já tem instalado, mas alcança tudo o que você alcança."
+    >
       <div className="segmented segmented--wide" role="radiogroup" aria-label="Computador">
-        {[false, true].map((v) => (
-          <button key={String(v)} role="radio" aria-checked={on === v} className={on === v ? 'is-active' : ''} onClick={() => on !== v && onToggle(v)}>
-            {v ? 'Ligado' : 'Desligado'}
+        {COMPUTER_CHOICES.map((c) => (
+          <button
+            key={c.value}
+            role="radio"
+            aria-checked={kind === c.value}
+            className={kind === c.value ? 'is-active' : ''}
+            onClick={() => {
+              if (kind === c.value) return
+              if (c.value === 'mac') return setConfirmMac(true)
+              setConfirmMac(false)
+              onChange(c.value)
+            }}
+          >
+            {c.label}
           </button>
         ))}
       </div>
+      {confirmMac && kind !== 'mac' && (
+        <div className="mac-confirm">
+          <p>
+            <strong>Os comandos dele vão rodar direto no seu Mac, como você.</strong> Ele passa a alcançar seus arquivos, seus outros projetos, as credenciais que estiverem no disco
+            (tokens, ~/.ssh) e as contas em que o terminal está logado. Uma página da web ou um arquivo com instruções escondidas pode tentar usar isso.
+          </p>
+          <p className="muted small">
+            Continua valendo: cada comando aparece no chat, as travas de loop e de teto seguem, e as chaves do app (GitHub, Telegram, conectores) não vão junto. Os comandos começam na pasta do
+            projeto do canal. Dá pra voltar pro Linux ou desligar quando quiser.
+          </p>
+          <div className="row">
+            <button className="btn btn--sm btn--danger" onClick={() => (setConfirmMac(false), onChange('mac'))}>
+              Liberar o Mac pra ele
+            </button>
+            <button className="btn btn--sm btn--ghost" onClick={() => setConfirmMac(false)}>
+              Cancelar
+            </button>
+          </div>
+        </div>
+      )}
+      {kind === 'mac' && (
+        <>
+          <div className="computer">
+            <span className="tag tag--warn">no seu Mac</span>
+            <span className="muted small grow">Os comandos começam na pasta do projeto do canal; fora de um projeto, na pasta dele.</span>
+          </div>
+          <Services agentId={agentId} />
+          <div className="row computer__actions">
+            <button className="btn btn--sm btn--ghost" onClick={() => computerAction(agentId, 'open_folder')}>
+              Abrir pasta dele
+            </button>
+            <button className="btn btn--sm btn--ghost" disabled={!info?.services.some((x) => x.running)} onClick={() => computerAction(agentId, 'restart')}>
+              Parar serviços
+            </button>
+          </div>
+        </>
+      )}
       {on && (
         <>
           <div className="computer">
@@ -482,28 +552,7 @@ function ComputerCard({ agentId, on, onToggle }: { agentId: string; on: boolean;
               </button>
             )}
           </div>
-          {info && info.services.length > 0 && (
-            <div className="table computer__services">
-              {info.services.map((svc) => (
-                <div key={svc.name} className="table__row">
-                  <Icon name="globe" size={14} />
-                  <span className="grow">
-                    <strong>{svc.name}</strong> <span className="muted small">porta {svc.port} · {svc.running ? 'no ar' : 'parado'}</span>
-                  </span>
-                  {svc.running && svc.url && (
-                    <>
-                      <button className="btn btn--sm btn--ghost" onClick={() => openExternal(svc.url!)}>
-                        Abrir
-                      </button>
-                      <button className="btn btn--sm btn--ghost" onClick={() => stopService(agentId, svc.name)}>
-                        Parar
-                      </button>
-                    </>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
+          <Services agentId={agentId} />
           <LentFolders agentId={agentId} />
           <div className="row computer__actions">
             <button className="btn btn--sm btn--ghost" onClick={() => computerAction(agentId, 'open_folder')}>
@@ -530,6 +579,37 @@ function ComputerCard({ agentId, on, onToggle }: { agentId: string; on: boolean;
         </>
       )}
     </Card>
+  )
+}
+
+// What the agent left running (servers, dashboards), on its computer or on the Mac.
+function Services({ agentId }: { agentId: string }): ReactNode {
+  const info = useStore((s) => computerOf(s, agentId))
+  return (
+    <>
+      {info && info.services.length > 0 && (
+        <div className="table computer__services">
+          {info.services.map((svc) => (
+            <div key={svc.name} className="table__row">
+              <Icon name="globe" size={14} />
+              <span className="grow">
+                <strong>{svc.name}</strong> <span className="muted small">porta {svc.port} · {svc.running ? 'no ar' : 'parado'}</span>
+              </span>
+              {svc.running && svc.url && (
+                <>
+                  <button className="btn btn--sm btn--ghost" onClick={() => openExternal(svc.url!)}>
+                    Abrir
+                  </button>
+                  <button className="btn btn--sm btn--ghost" onClick={() => stopService(agentId, svc.name)}>
+                    Parar
+                  </button>
+                </>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </>
   )
 }
 

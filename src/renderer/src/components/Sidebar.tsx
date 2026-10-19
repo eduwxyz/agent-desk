@@ -177,6 +177,11 @@ function AgentItem({ id }: { id: string }): ReactNode {
       <AgentAvatar agent={agent} size={18} />
       <span className="nav-item__label">{agent.name}</span>
       <span className="nav-item__meta">{agent.role}</span>
+      {agent.computer && agent.computerKind === 'mac' && (
+        <span className="nav-item__mac" title="Roda no seu Mac">
+          <Icon name="laptop" size={13} />
+        </span>
+      )}
       {pct >= 0.8 && <span className={`dot ${pct >= 1 ? 'dot--danger' : 'dot--warn'}`} title="Orçamento acima de 80%" />}
     </button>
   )

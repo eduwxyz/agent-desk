@@ -297,6 +297,17 @@ O computador dos agentes não tem credenciais. Pra publicar:
 - **`abrir_pr`** (branch agent/*, título, descrição, base): um pedido de aprovação; aprovado, o app abre a PR pela API, com o custo da issue no rodapé, e o agente recebe o link.
 - Testado com git de verdade dentro do computador de um agente, contra um servidor git local no lugar do GitHub: clone e push em `agent/teste` passaram com o token posto pelo proxy; push na main foi recusado com a mensagem acima e a main ficou intacta.
 
+### 23. Computador no Mac (M13)
+
+Cada agente tem um de três computadores, escolhido na página dele: **nenhum** (só conversa, web e conectores), **Linux isolado** (o container do §13) ou **este Mac**. É uma escolha consciente do usuário, por agente: no Mac, o agente roda comandos como o usuário, com tudo o que está instalado (Homebrew, Python, mlx-whisper, `say`, Chrome), e alcança tudo o que o usuário alcança. Serve pra trabalho que depende do Mac (o motor de vídeos usa a GPU da Apple pra transcrever e renderiza 3x mais rápido que no container).
+
+- **As mesmas ferramentas** (bash, ler/escrever/editar arquivo, serviço, print, mostrar arquivo), descritas pro macOS. Cada chamada é um passo no chat; as travas de loop, travado e teto valem igual.
+- **Onde os comandos começam:** a pasta do projeto do canal, se o agente tem acesso a ela; senão, a pasta dele nos dados do app. Caminhos aceitam `~`. Só leitura num projeto vira instrução (não há como impedir no Mac).
+- **Ambiente:** o do shell de login do usuário, montado a partir de um ambiente limpo (o PATH do perfil, sem nenhuma variável do processo do app). As chaves do app (GitHub, Jev, Telegram, conectores) nunca vão junto.
+- **Serviços** em qualquer porta acima de 1024 livre no Mac (menos as do app), com o grupo de processos parado junto.
+- **Confirmação ao ligar**, dizendo o que o agente passa a alcançar; selo "no seu Mac" na barra lateral e em cada mensagem dele; o prompt pede que mexa só no que a tarefa pede, não toque em credenciais nem em outros projetos, não instale nada no sistema sem dizer e só faça push, deploy ou publicação quando o usuário pedir.
+- Trocar pra Linux ou nenhum para os serviços dele no Mac; trocar do Linux pro Mac para o container.
+
 ## Acceptance criteria
 
 1. **Chat básico:** crio um agente no Claude Code, abro DM, mando uma mensagem e vejo a resposta em streaming, com rodapé de modelo/tokens/duração. O mesmo funciona com um agente no Codex.
@@ -339,6 +350,7 @@ O computador dos agentes não tem credenciais. Pra publicar:
 29. **Celular (M11):** com o bot pareado, uma aprovação chega no Telegram com botões e o toque decide; uma ação de alto risco pede dois toques; uma pergunta respondida no Telegram vira a minha mensagem na conversa; outro chat não consegue nada.
 30. **Da issue à PR (M12):** o Staff faz commit em `agent/x` e `git push`; passa, com a linha no canal; um push na main é recusado com o motivo; `abrir_pr` vira um pedido, e aprovado abre a PR com o custo da issue.
 31. **Governança no dia a dia (M12):** "Aprovar e sempre permitir" faz a próxima chamada igual rodar sem pedido (não pra alto risco); um agente sem acesso pede e, aprovado, ganha o grant e continua; pausado, ninguém responde nem roda rotina; o boletim mostra cada agente e o custo por issue.
+32. **Computador no Mac (M13):** um agente com "Este Mac" roda `pwd` e cai na pasta do projeto do canal; o PATH é o do terminal do usuário e não tem variável do app; um serviço sobe numa porta do Mac e para com os filhos; trocar pra Linux ou nenhum para os serviços.
 
 ## Out of scope (MVP)
 
@@ -437,6 +449,7 @@ O computador dos agentes não tem credenciais. Pra publicar:
 10. **M10, travas e cache (feito):** loop, travado e teto com Continuar no lugar de 50 chamadas e 15 min; cache lido conta 10%; conversa em blocos pro cache. (AC 24) Testado com o Claude Code real: a segunda resposta leu 92% do cache, e um teto baixo pausou e continuou.
 11. **M11, gatilhos, skills e celular (feito):** rotina por item novo num conector ou por chamada local; skills com proposta, diff e histórico; aprovações e perguntas pelo Telegram. (AC 27, 28, 29) Testado de verdade: a chamada local rodou a Lia; o gatilho do Linear olhou e mostrou o erro do conector desautorizado; o Staff leu e propôs skills com o Claude Code real. O Telegram está testado contra uma API simulada; falta o bot real.
 12. **M12, da issue à PR e governança no dia a dia (feito):** proxy de git com push só em agent/* e PR por aprovação; boletim e custo por issue; sempre permitir, pedido de acesso, pausar tudo, horário de silêncio, cota da assinatura, time em .md e backup diário. (AC 30, 31)
+13. **M13, computador no Mac (feito):** nenhum, Linux isolado ou este Mac, por agente, com confirmação e selo. (AC 32)
 
 O MVP termina quando os oito estiverem prontos e eu usar o app por uma semana no dia a dia.
 

@@ -12,6 +12,7 @@ import type { CoreEvent } from '../shared/rpc'
 import { PROJECTS_DIR, type Agent, type Artifact, type ArtifactKind, type ComputerInfo, type LentFolder, type Service } from '../shared/types'
 import type { Db } from './db'
 import { textResult, type ToolDef } from './gateway'
+import { MacComputer, macTools } from './mac'
 
 export const IMAGE = 'node:22-bookworm'
 export const PORTS = [3000, 3001, 4173, 5000, 5173, 8000, 8080, 8501, 8888]
@@ -150,6 +151,9 @@ export const COMPUTER_TOOLS: ToolDef[] = [
 
 export const COMPUTER_TOOL_NAMES = new Set(COMPUTER_TOOLS.map((t) => t.name))
 
+// The tools as the agent sees them: described for its Linux computer or for the Mac.
+export const computerTools = (agent: Pick<Agent, 'computerKind'>): ToolDef[] => (agent.computerKind === 'mac' ? macTools() : COMPUTER_TOOLS)
+
 // ---------- pure helpers (tested on their own) ----------
 
 // Long output keeps its start and, mostly, its end: errors usually come last.
@@ -179,6 +183,10 @@ export function formatExec(r: { code: number; stdout: string; stderr: string }, 
 
 // A path as the agent writes it, resolved inside the computer.
 export function containerPath(p: string): string {
+  return linuxPath(p)
+}
+
+function linuxPath(p: string): string {
   return posix.normalize(p.startsWith('/') ? p : posix.join(WORK, p))
 }
 
@@ -275,8 +283,10 @@ export class Computers {
   private ports = new Map<string, Record<number, number>>()
   private starting = new Map<string, Promise<void>>()
   private prefix: string
+  readonly mac: MacComputer // agents whose computer is this Mac (spec §23)
 
   constructor(private deps: ComputerDeps) {
+    this.mac = new MacComputer({ db: deps.db, dataDir: deps.dataDir, emit: deps.emit, shoot: deps.shoot })
     // Containers of another data directory (tests, a second install) never collide.
     this.prefix = `agentdesk-${createHash('sha1').update(deps.dataDir).digest('hex').slice(0, 6)}`
   }
@@ -289,7 +299,13 @@ export class Computers {
     return join(this.deps.dataDir, 'computers', agentId, 'work')
   }
 
+  private onMac(agentId: string): Agent | undefined {
+    const a = this.deps.db.agent(agentId)
+    return a?.computerKind === 'mac' ? a : undefined
+  }
+
   info(agent: Agent): ComputerInfo {
+    if (agent.computerKind === 'mac') return this.mac.info(agent)
     return this.infos.get(agent.id) ?? { agentId: agent.id, state: agent.computer ? 'stopped' : 'off', folder: this.folder(agent.id), services: [] }
   }
 
@@ -303,6 +319,7 @@ export class Computers {
 
   // Reads the container's real state, for the agent page.
   async refresh(agent: Agent): Promise<void> {
+    if (agent.computerKind === 'mac') return this.mac.refresh(agent)
     if (!agent.computer) return this.set(agent.id, { state: 'off', services: [] })
     const r = await docker(['inspect', '-f', '{{.State.Running}}', this.name(agent.id)], { timeoutMs: 10_000 })
     if (r.code !== 0) {
@@ -316,6 +333,7 @@ export class Computers {
 
   // Creates or starts the container. The first time pulls the image, which takes a while.
   ensure(agentId: string): Promise<void> {
+    if (this.onMac(agentId)) return Promise.resolve()
     const current = this.starting.get(agentId)
     if (current) return current
     const p = this.doEnsure(agentId).finally(() => this.starting.delete(agentId))
@@ -432,18 +450,27 @@ export class Computers {
   }
 
   async stop(agentId: string): Promise<void> {
+    if (this.onMac(agentId)) return this.mac.stopAll(agentId)
+    return this.stopLinux(agentId)
+  }
+
+  // The container only, whatever the agent's computer is now (used when it moves to the Mac or turns off).
+  async stopLinux(agentId: string): Promise<void> {
     await docker(['stop', '-t', '5', this.name(agentId)], { timeoutMs: 60_000 })
     this.ports.delete(agentId)
     this.set(agentId, { state: 'stopped', services: await this.serviceStatus(agentId) })
   }
 
   async restart(agentId: string): Promise<void> {
+    if (this.onMac(agentId)) return this.mac.stopAll(agentId)
     await this.stop(agentId)
     await this.ensure(agentId)
   }
 
   // Everything goes: the container, what was installed, and /work.
   async erase(agentId: string): Promise<void> {
+    const mac = this.onMac(agentId)
+    if (mac) return this.mac.erase(agentId).then(() => this.mac.refresh(mac))
     await docker(['rm', '-f', this.name(agentId)], { timeoutMs: 60_000 })
     await docker(['rmi', '-f', this.stateImage(agentId)], { timeoutMs: 60_000 })
     const volumes = await docker(['volume', 'ls', '-q', '--filter', `name=^${this.name(agentId)}-`], { timeoutMs: 15_000 })
@@ -487,6 +514,7 @@ export class Computers {
   }
 
   async stopService(agentId: string, name: string): Promise<boolean> {
+    if (this.onMac(agentId)) return this.mac.stopService(agentId, name)
     const pid = `/run/agentdesk/${name}.pid`
     const r = await docker(
       ['exec', this.name(agentId), 'bash', '-c', `p=$(cat ${pid} 2>/dev/null) || exit 3; kill -TERM -- -$p 2>/dev/null; for i in 1 2 3 4 5 6; do kill -0 $p 2>/dev/null || exit 0; sleep 0.5; done; kill -KILL -- -$p 2>/dev/null; exit 0`],
@@ -659,6 +687,7 @@ export class Computers {
   // ---------- the tools ----------
 
   async call(agent: Agent, name: string, args: Record<string, unknown>, ctx: { conversationId: string; messageId: string; signal?: AbortSignal }): Promise<ToolOutcome> {
+    if (agent.computerKind === 'mac') return this.mac.call(agent, name, args, ctx)
     try {
       await this.ensure(agent.id)
     } catch (e) {
@@ -697,8 +726,9 @@ export class Computers {
 }
 
 // A one-line description of a computer tool call, for its step in the chat.
-export function stepFor(name: string, args: Record<string, unknown>): { label: string; detail: string } {
+export function stepFor(name: string, args: Record<string, unknown>, onMac = false): { label: string; detail: string } {
   const s = (k: string): string => String(args[k] ?? '')
+  const containerPath = (p: string): string => (onMac ? p : linuxPath(p))
   const short = (t: string): string => (t.length > 140 ? `${t.slice(0, 140)}…` : t)
   switch (name) {
     case 'bash':

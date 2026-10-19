@@ -179,6 +179,11 @@ function MessageRow({ message, grouped }: { message: Message; grouped: boolean }
               <span className="msg__author">{name}</span>
             )}
             {agent && <span className="tag tag--agent">agente</span>}
+            {agent?.computer && agent.computerKind === 'mac' && (
+              <span className="tag tag--warn" title="Os comandos deste agente rodam direto no seu Mac">
+                no seu Mac
+              </span>
+            )}
             <span className="msg__time">{time(message.at)}</span>
           </div>
         )}

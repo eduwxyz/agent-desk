@@ -311,10 +311,19 @@ const api: Api = {
   saveAgent: ({ agent, channelIds }) => {
     const clean: Agent = { ...agent, name: agent.name.trim(), handle: agent.handle.trim().toLowerCase() }
     const before = db.agent(clean.id)
+    const linux = (a?: Agent): boolean => !!a?.computer && a.computerKind !== 'mac'
+    const mac = (a?: Agent): boolean => !!a?.computer && a.computerKind === 'mac'
     db.saveAgent(clean)
-    // Turning the computer on starts it right away (the first time downloads the system); off stops it.
-    if (clean.computer && !before?.computer) void computers.ensure(clean.id).catch(() => {})
-    else if (!clean.computer && before?.computer) void computers.stop(clean.id).then(() => computers.refresh(clean))
+    // A Linux computer starts right away when turned on (the first time downloads the system) and stops when
+    // turned off or moved to the Mac; a computer on the Mac has nothing to start, only its services to stop.
+    if (linux(clean) && !linux(before)) void computers.ensure(clean.id).catch(() => {})
+    if (linux(before) && !linux(clean))
+      void computers.stopLinux(clean.id).then(() => {
+        if (mac(clean)) db.removeServices(clean.id) // the container's services don't exist on the Mac
+        return computers.refresh(clean)
+      })
+    if (mac(before) && !mac(clean)) void computers.mac.stopAll(clean.id).then(() => computers.refresh(clean))
+    if (mac(clean) && !mac(before)) void computers.refresh(clean)
     const changed = db.setAgentChannels(clean.id, channelIds)
     emit({ type: 'agent', agent: db.agent(clean.id)! })
     emitConversations(changed)

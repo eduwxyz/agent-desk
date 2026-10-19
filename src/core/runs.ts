@@ -6,7 +6,7 @@ import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
 import { ACCESS_REQUEST, CACHE_READ_WEIGHT, describeSchedule, workIn, ENGINES, ERRORS_STOP, modelInfo, REPEAT_STOP, REPEAT_WARN, RUN_BUDGET_PCT, RUN_STALL_MINUTES, type Agent, type Approval, type Connector, type ConnectorTool, type Conversation, type EngineId, type Message, type Quota, type Receipt, type Routine, type Run, type RunStatus, type Settings, type Step } from '../shared/types'
 import { HISTORY_LIMIT, mentioned, systemPrompt, transcript } from './context'
 import { LEMBRAR, type Memories } from './memory'
-import { COMPUTER_TOOL_NAMES, COMPUTER_TOOLS, stepFor, type Computers } from './computer'
+import { COMPUTER_TOOL_NAMES, computerTools, stepFor, type Computers } from './computer'
 import { AGENDAR, CANCELAR, ROUTINE_TOOL_NAMES, type Routines } from './routines'
 import { ABRIR_PR, GITHUB, type GitHub } from './github'
 import { readContext } from './projects'
@@ -48,7 +48,7 @@ export interface RunnerDeps {
   gateway?: Gateway // without it, agents get no tools at all
   connectors?: Connectors
   memory?: Memories // without it, agents get no memory and see the last HISTORY_LIMIT messages
-  computers?: Pick<Computers, 'call'> // without it, no agent has a computer
+  computers?: Pick<Computers, 'call'> & Partial<Pick<Computers, 'mac'>> // without it, no agent has a computer
   routines?: Pick<Routines, 'schedule' | 'cancel' | 'forAgent'> // without it, agents can't schedule
   notify?: (title: string, body: string, conversationId?: string, kind?: 'approval') => void
   jev?: { key(): Promise<string | undefined>; fetch?: typeof fetch } // the TypeSafe router, when chosen in settings
@@ -517,7 +517,7 @@ export class Runner {
       ...(accessTool ? [accessTool] : []),
       ...(prTool ? [prTool] : []),
       ...(canRemember ? [LEMBRAR] : []),
-      ...(computers ? COMPUTER_TOOLS : []),
+      ...(computers ? computerTools(agent) : []),
       ...(routines ? [AGENDAR, CANCELAR] : []),
       ...(skills ? [...(mySkills.length ? [LER_SKILL] : []), PROPOR_SKILL] : []),
       ...[...exposed].map(([name, { connector, tool }]): ToolDef => {
@@ -583,7 +583,7 @@ export class Runner {
           const current = db.agent(agent.id)
           if (!current?.computer) return textResult('Seu computador foi desligado.', true)
           const t0 = Date.now()
-          const { label, detail } = stepFor(name, args)
+          const { label, detail } = stepFor(name, args, current.computerKind === 'mac')
           const step: Step = { id: randomUUID(), label, detail, status: 'running' }
           flush()
           msg.run = { ...msg.run!, steps: [...closeThinking('done', 'Pensou'), step] }
@@ -772,6 +772,7 @@ export class Runner {
           memories: promptMemories,
           canRemember,
           hasComputer: !!computers,
+          macFolder: computers?.mac && agent.computerKind === 'mac' ? computers.mac.cwd(agent, conv.id) : undefined,
           web: agent.web !== false,
           routines: routines?.forAgent(agent.id),
           skills: skills && mySkills,

@@ -36,7 +36,8 @@ export interface Agent {
   used: number // tokens used this month, computed from receipts
   grants: Record<string, GrantLevel>
   memory: MemoryMode
-  computer: boolean // has its own Linux computer (spec §13)
+  computer: boolean // has a computer (spec §13): see computerKind for which
+  computerKind?: ComputerKind // 'linux' (default): an isolated container; 'mac': this Mac, as the user (spec §23)
   web?: boolean // searches the web and reads pages with the CLI's own tools (spec §16); on unless false
   autoApprove?: string[] // "connectorId:tool" sensitive tools approved for good ("sempre permitir"), never high-risk ones
   folders?: LentFolder[] // Mac folders lent to that computer (spec §13, M5.1); changed only through lendFolder/folderAction
@@ -52,6 +53,10 @@ export interface LentFolder {
 }
 
 export const PROJECTS_DIR = '/projetos'
+
+// Where an agent's computer runs: an isolated Linux container, or the user's own Mac (spec §23).
+export type ComputerKind = 'linux' | 'mac'
+export const isMac = (a: Pick<Agent, 'computer' | 'computerKind'>): boolean => a.computer && a.computerKind === 'mac'
 
 export interface Conversation {
   id: string
@@ -300,7 +305,7 @@ export type ComputerState = 'off' | 'starting' | 'running' | 'stopped' | 'no_doc
 export interface Service {
   name: string
   command: string
-  port: number // inside the computer
+  port: number // inside the computer (on a Mac computer: on the Mac)
   url?: string // on the Mac (127.0.0.1), while the computer runs
   running: boolean
   startedAt: number
@@ -310,8 +315,9 @@ export interface ComputerInfo {
   agentId: string
   state: ComputerState
   detail?: string // what is happening, or what went wrong
-  folder: string // /work, on the Mac
+  folder: string // /work, on the Mac (on a Mac computer: its default working folder)
   services: Service[]
+  kind?: ComputerKind
 }
 
 export type ArtifactKind = 'image' | 'markdown' | 'html' | 'pdf' | 'csv' | 'text' | 'file'
