@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { Agent, Conversation } from '../src/shared/types'
 import { systemPrompt } from '../src/core/context'
-import { Computers, computerTools, COMPUTER_TOOLS, stepFor } from '../src/core/computer'
+import { artifactKind, Computers, computerTools, COMPUTER_TOOLS, stepFor } from '../src/core/computer'
 import { Db } from '../src/core/db'
 import { loginEnv, MacComputer, macPath } from '../src/core/mac'
 
@@ -35,6 +35,13 @@ const freePort = (): Promise<number> =>
       s.close(() => resolve(port))
     })
   })
+
+describe('what a shown file is', () => {
+  it('videos play in the side panel; code and text open as text', () => {
+    expect(['a.mp4', 'b.MOV', 'c.webm', 'd.m4v'].map(artifactKind)).toEqual(['video', 'video', 'video', 'video'])
+    expect(artifactKind('falas.py')).toBe('text')
+  })
+})
 
 describe('paths on the Mac', () => {
   it('resolves ~, absolute and relative paths', () => {

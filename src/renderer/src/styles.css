@@ -1716,7 +1716,8 @@ h3 {
   overflow: auto;
   padding: 16px;
 }
-.side-panel__image img {
+.side-panel__image img,
+.side-panel__image video {
   max-width: 100%;
   border-radius: var(--radius);
   box-shadow: var(--shadow);

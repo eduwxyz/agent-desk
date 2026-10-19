@@ -4,10 +4,12 @@ import { useEffect, useState, type ReactNode } from 'react'
 import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { artifactUrl, computerOf, openExternal, openPanel, stopService, useStore, type Artifact } from '../store'
+import { call } from '../rpc'
 import { Icon } from './ui'
 
 const KIND_LABEL: Record<Artifact['kind'], string> = {
   image: 'Imagem',
+  video: 'Vídeo',
   markdown: 'Documento',
   html: 'Página',
   pdf: 'PDF',
@@ -32,7 +34,7 @@ export function ArtifactCard({ id }: { id: string }): ReactNode {
   return (
     <button className={`artifact-card ${open ? 'is-open' : ''}`} onClick={() => openPanel({ kind: 'artifact', id })}>
       <span className="artifact-card__icon">
-        <Icon name={a.kind === 'html' ? 'globe' : 'edit'} size={16} />
+        <Icon name={a.kind === 'html' ? 'globe' : a.kind === 'video' ? 'play' : 'edit'} size={16} />
       </span>
       <span className="artifact-card__text">
         <strong>{a.title}</strong>
@@ -127,16 +129,23 @@ function ArtifactView({ artifact }: { artifact: Artifact }): ReactNode {
   useEffect(() => {
     setText(null)
     if (textual)
-      void fetch(url)
-        .then((r) => r.text())
-        .then(setText, () => setText('(não consegui abrir o arquivo)'))
-  }, [url, textual])
+      void call('artifactText', { id: artifact.id }).then(
+        (t) => setText(t ?? '(não consegui abrir o arquivo)'),
+        () => setText('(não consegui abrir o arquivo)')
+      )
+  }, [artifact.id, textual])
 
   switch (artifact.kind) {
     case 'image':
       return (
         <div className="side-panel__image">
           <img src={url} alt={artifact.title} />
+        </div>
+      )
+    case 'video':
+      return (
+        <div className="side-panel__image">
+          <video src={url} controls preload="metadata" />
         </div>
       )
     case 'html':

@@ -19,6 +19,7 @@ export interface Snapshot {
 
 export interface Api {
   snapshot(): Snapshot
+  artifactText(p: { id: string }): string | null // a text file an agent showed (Markdown, CSV, code), for the side panel
   sendMessage(p: { conversationId: string; text: string }): void
   stopRun(p: { messageId: string }): void
   retryRun(p: { messageId: string }): void

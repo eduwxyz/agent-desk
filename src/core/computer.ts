@@ -223,6 +223,7 @@ export function seenImage(file: string): { type: 'image'; data: string; mimeType
 export function artifactKind(name: string): ArtifactKind {
   const ext = extname(name).toLowerCase().slice(1)
   if (['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'].includes(ext)) return 'image'
+  if (['mp4', 'm4v', 'mov', 'webm'].includes(ext)) return 'video'
   if (['md', 'markdown'].includes(ext)) return 'markdown'
   if (['html', 'htm'].includes(ext)) return 'html'
   if (ext === 'pdf') return 'pdf'

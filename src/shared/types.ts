@@ -320,7 +320,7 @@ export interface ComputerInfo {
   kind?: ComputerKind
 }
 
-export type ArtifactKind = 'image' | 'markdown' | 'html' | 'pdf' | 'csv' | 'text' | 'file'
+export type ArtifactKind = 'image' | 'video' | 'markdown' | 'html' | 'pdf' | 'csv' | 'text' | 'file'
 
 export interface Artifact {
   id: string

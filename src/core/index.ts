@@ -2,7 +2,7 @@
 // live here so the window never waits on agent work. The renderer talks to it
 // over a MessagePort handed out by the main process.
 import { execFile } from 'node:child_process'
-import { existsSync, mkdirSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync } from 'node:fs'
 import { userInfo } from 'node:os'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
@@ -282,6 +282,18 @@ function emitConversations(ids?: string[]): void {
 const demoPath = join(process.cwd(), 'scripts', 'demo-mcp-server.mjs')
 
 const api: Api = {
+  // The page loads from file://, which can't fetch agentdesk:// (CORS); text comes through the core instead.
+  artifactText: ({ id }) => {
+    const a = db.artifacts().find((x) => x.id === id)
+    if (!a) return null
+    const file = join(dataDir, 'artifacts', a.id, a.name)
+    try {
+      return readFileSync(file, 'utf8').slice(0, 2_000_000)
+    } catch {
+      return null
+    }
+  },
+
   snapshot: () => ({
     settings: settings(),
     agents: db.agents(),
