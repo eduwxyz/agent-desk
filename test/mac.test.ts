@@ -100,6 +100,14 @@ describe('an agent whose computer is this Mac', () => {
     expect(existsSync(join(dataDir, 'artifacts', r.artifact!.id, 'grade.md'))).toBe(true)
   })
 
+  it('an image it shows comes back to it too, so it can check it', async () => {
+    writeFileSync(join(project, 'grade.jpg'), Buffer.from([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3]))
+    const r = await mac.call(db.agent('prod-0001')!, 'show_file', { path: 'grade.jpg' }, ctx)
+    expect(r.artifact?.kind).toBe('image')
+    expect(r.result.content[0]).toMatchObject({ type: 'image', mimeType: 'image/jpeg', data: Buffer.from([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3]).toString('base64') })
+    expect((r.result.content[1] as { text: string }).text).toContain('pra você conferir')
+  })
+
   it('keeps a service running on a Mac port, and stops it with its children', async () => {
     const me = db.agent('prod-0001')!
     const port = await freePort()
@@ -135,6 +143,8 @@ describe('an agent whose computer is this Mac', () => {
     expect(prompt).toContain('## Seu computador: o Mac de Edu')
     expect(prompt).toContain(`Eles começam em ${project} (a pasta do projeto deste canal)`)
     expect(prompt).not.toContain('/work')
+    const off = systemPrompt({ agent: me, settings: { workspaceName: 'Edu', context: '' }, conversation: conv, peers: [], offline: ['Linear'] })
+    expect(off).toContain('Você tem acesso a Linear, mas ele está desconectado agora')
   })
 })
 

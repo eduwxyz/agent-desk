@@ -14,7 +14,7 @@ import type { CoreEvent } from '../shared/rpc'
 import type { Agent, Artifact, ComputerInfo, Service } from '../shared/types'
 import type { Db } from './db'
 import { textResult, type ToolDef } from './gateway'
-import { artifactKind, clipOutput, COMPUTER_TOOLS, formatExec, type Shooter, type ToolOutcome } from './computer'
+import { artifactKind, clipOutput, COMPUTER_TOOLS, formatExec, seenImage, type Shooter, type ToolOutcome } from './computer'
 
 const MAX_FILE = 200_000
 const MAX_SHOW_BYTES = 50 * 1024 * 1024
@@ -27,7 +27,7 @@ const MAC_DESCRIPTIONS: Record<string, string> = {
   start_service:
     'Deixa um processo rodando em segundo plano no Mac (servidor web, API, dashboard) e confere se ele abriu a porta (qualquer porta acima de 1024 que esteja livre). O log fica na pasta de trabalho, em .logs/<nome>.log. Iniciar de novo com o mesmo nome reinicia.',
   screenshot: 'Tira um print de uma página web e mostra no chat; você também recebe a imagem. Serve http://localhost:<porta> (o Mac) ou qualquer URL da internet.',
-  show_file: 'Mostra um arquivo do Mac no chat: imagem, vídeo, Markdown, HTML, PDF, CSV ou texto (até 50 MB). O arquivo é guardado como está agora.'
+  show_file: 'Mostra um arquivo do Mac no chat: imagem, vídeo, Markdown, HTML, PDF, CSV ou texto (até 50 MB). O arquivo é guardado como está agora. Se for imagem, você também a recebe pra conferir.'
 }
 
 // The same tools, described for the Mac (a function: computer.ts and this file import each other).
@@ -388,7 +388,9 @@ export class MacComputer {
         const title = (typeof args['title'] === 'string' && args['title'].trim()) || basename(file)
         const kept = this.keep(agent.id, ctx, { name: basename(file), title, source: file, path: file })
         if ('error' in kept) return { result: textResult(kept.error, true) }
-        return { result: textResult(`Mostrei "${title}" no chat.`), artifact: kept }
+        const image = seenImage(file)
+        const said = { type: 'text' as const, text: image ? `Mostrei "${title}" no chat. A imagem está aqui pra você conferir.` : `Mostrei "${title}" no chat.` }
+        return { result: { content: image ? [image, said] : [said] }, artifact: kept }
       }
       default:
         return { result: textResult(`Ferramenta desconhecida: ${name}`, true) }

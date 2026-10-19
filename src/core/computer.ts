@@ -4,7 +4,7 @@
 // Mac; the computer only receives commands through these tools.
 import { spawn } from 'node:child_process'
 import { createHash, randomUUID } from 'node:crypto'
-import { existsSync, mkdirSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { basename, extname, join, posix, sep } from 'node:path'
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
@@ -140,7 +140,7 @@ export const COMPUTER_TOOLS: ToolDef[] = [
   {
     name: 'show_file',
     description:
-      'Mostra um arquivo do seu computador no chat: imagem, Markdown, HTML, PDF, CSV ou texto. O arquivo é guardado como está agora. HTML precisa ser autossuficiente (CSS e JS dentro dele); pra um app com vários arquivos, use start_service e screenshot.',
+      'Mostra um arquivo do seu computador no chat: imagem, Markdown, HTML, PDF, CSV ou texto. O arquivo é guardado como está agora. Se for imagem, você também a recebe pra conferir. HTML precisa ser autossuficiente (CSS e JS dentro dele); pra um app com vários arquivos, use start_service e screenshot.',
     inputSchema: {
       type: 'object',
       properties: { path: { type: 'string' }, title: { type: 'string', description: 'Um título curto pro card no chat.' } },
@@ -203,6 +203,21 @@ export function listening(procNet: string, port: number): 'all' | 'loopback' | n
     found = 'loopback'
   }
   return found
+}
+
+// An image the model can see too, when a tool shows one (the API takes up to ~5 MB per image).
+const SEEABLE: Record<string, string> = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp' }
+const MAX_SEEN_BYTES = 4_500_000
+
+export function seenImage(file: string): { type: 'image'; data: string; mimeType: string } | undefined {
+  const mimeType = SEEABLE[extname(file).toLowerCase().slice(1)]
+  if (!mimeType) return undefined
+  try {
+    if (statSync(file).size > MAX_SEEN_BYTES) return undefined
+    return { type: 'image', data: readFileSync(file).toString('base64'), mimeType }
+  } catch {
+    return undefined
+  }
 }
 
 export function artifactKind(name: string): ArtifactKind {
@@ -654,7 +669,9 @@ export class Computers {
     const title = (typeof args['title'] === 'string' && args['title'].trim()) || basename(abs)
     const kept = await this.keep(agentId, ctx, { name: basename(abs), title, source: abs, containerPath: abs })
     if ('error' in kept) return { result: textResult(kept.error, true) }
-    return { result: textResult(`Mostrei "${title}" no chat.`), artifact: kept }
+    const image = seenImage(join(this.deps.dataDir, 'artifacts', kept.id, kept.name))
+    const said = { type: 'text' as const, text: image ? `Mostrei "${title}" no chat. A imagem está aqui pra você conferir.` : `Mostrei "${title}" no chat.` }
+    return { result: { content: image ? [image, said] : [said] }, artifact: kept }
   }
 
   private async screenshot(agentId: string, args: Record<string, unknown>, ctx: { conversationId: string; messageId: string }): Promise<ToolOutcome> {

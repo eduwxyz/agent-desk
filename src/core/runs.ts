@@ -772,6 +772,7 @@ export class Runner {
           memories: promptMemories,
           canRemember,
           hasComputer: !!computers,
+          offline: (this.deps.connectors?.list() ?? []).filter((c) => c.status !== 'connected' && (agent.grants[c.id] ?? 'none') !== 'none').map((c) => c.name),
           macFolder: computers?.mac && agent.computerKind === 'mac' ? computers.mac.cwd(agent, conv.id) : undefined,
           web: agent.web !== false,
           routines: routines?.forAgent(agent.id),

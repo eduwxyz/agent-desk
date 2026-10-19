@@ -15,6 +15,7 @@ export function systemPrompt(opts: {
   memories?: { aboutMe: Memory[]; own: Memory[] }
   canRemember?: boolean
   hasComputer?: boolean
+  offline?: string[] // connectors it has access to that aren't connected right now
   macFolder?: string // a computer on this Mac (spec §23): where its commands start in this conversation
   web?: boolean
   routines?: Routine[] // its own, when it can schedule
@@ -22,7 +23,7 @@ export function systemPrompt(opts: {
   publish?: string // the GitHub repository it can push agent/* branches to, from this channel
   project?: { files: ContextFile[]; memories: Memory[] } // when the conversation is a project channel
 }): string {
-  const { agent, settings, conversation, peers, memories, canRemember, hasComputer, macFolder, web, routines, skills, publish, project } = opts
+  const { agent, settings, conversation, peers, memories, canRemember, hasComputer, macFolder, offline, web, routines, skills, publish, project } = opts
   const me = settings.workspaceName || 'o usuário'
   const where =
     conversation.kind === 'dm'
@@ -76,6 +77,8 @@ export function systemPrompt(opts: {
       skills &&
         `- Quando descobrir um jeito de fazer algo que vale repetir (resolveu em vários passos, saiu de um beco sem saída, ${me} corrigiu você), proponha uma skill com propor_skill, ou uma mudança numa sua. Ela só vale depois que ${me} aprovar.`,
       `- Suas outras ferramentas são as que ${me} liberou pra você. Ações sensíveis não rodam na hora: viram um pedido de aprovação, e você recebe o resultado depois da decisão.`,
+      offline?.length &&
+        `- Você tem acesso a ${offline.join(', ')}, mas ${offline.length > 1 ? 'eles estão desconectados' : 'ele está desconectado'} agora, então as ferramentas não aparecem pra você. Se precisar, peça a ${me} pra reconectar em Conectores (não é falta de permissão).`,
       hasComputer
         ? '- Não diga que fez algo que nenhuma ferramenta sua fez.'
         : '- Não tem shell nem acesso a arquivos. Não diga que fez algo que nenhuma ferramenta sua fez; se faltar uma ferramenta, diga o que faria e peça o que falta.'
