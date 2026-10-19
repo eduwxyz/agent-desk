@@ -1998,3 +1998,87 @@ table.csv th {
   align-items: center;
   gap: 10px;
 }
+
+/* ---------- triggers ---------- */
+.routine__hook {
+  margin-top: 6px;
+  gap: 8px;
+}
+.routine__hook code {
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: var(--panel-2, var(--panel));
+  border: 1px solid var(--border);
+}
+.routine-event {
+  margin: 2px 0 6px;
+}
+.routine-event .icon {
+  vertical-align: -2px;
+}
+
+/* ---------- skills ---------- */
+.skill__agents {
+  gap: 8px;
+}
+.skill__body,
+.diff {
+  margin: 8px 0 0;
+  padding: 10px 12px;
+  max-height: 360px;
+  overflow: auto;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  font: 12px/1.5 var(--mono, ui-monospace, monospace);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.diff__add {
+  background: var(--ok-soft);
+  color: var(--ok);
+}
+.diff__del {
+  background: var(--danger-soft);
+  color: var(--danger);
+  text-decoration: line-through;
+}
+.diff__same {
+  color: var(--text-2);
+}
+.skill__history {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+}
+.skill__pick {
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.chip {
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--text-2);
+  font-size: 12px;
+}
+.chip.is-on {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-text);
+}
+
+/* ---------- phone ---------- */
+.phone-code {
+  font: 600 20px/1 var(--mono, ui-monospace, monospace);
+  letter-spacing: 3px;
+}
+.steps-list {
+  margin: 0 0 10px;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}

@@ -137,6 +137,14 @@ export interface Settings {
   openAtLogin?: boolean // so routines run without me opening the app
   runBudgetPct?: number // per reply, % of the agent's monthly limit before it pauses; default RUN_BUDGET_PCT
   runStallMinutes?: number // without any sign of life; default RUN_STALL_MINUTES
+  telegram?: TelegramInfo // computed: the phone bot (spec §19)
+}
+
+export interface TelegramInfo {
+  bot?: string // @username, when a token is saved
+  chat?: string // the paired chat's name
+  code?: string // to pair: send "/start <code>" to the bot
+  error?: string
 }
 
 // Guards per reply (spec §3), so nothing runs away unattended (a routine at 3 a.m.)
@@ -305,13 +313,33 @@ export interface Schedule {
   once?: boolean // runs at the next matching time, then turns itself off
 }
 
+// What starts a routine other than the clock (spec §17). The app is local, so
+// nothing from the internet can call it: it checks a connector every few
+// minutes, or listens on the Mac itself for a script, a git hook, Xcode…
+export type Trigger =
+  | {
+      kind: 'poll'
+      connectorId: string
+      tool: string // a read tool of that connector, e.g. Linear's list_issues
+      args: Record<string, unknown>
+      everyMinutes: number
+      seen?: string[] // ids of the items already handled (or there when it started)
+      checkedAt?: number
+      error?: string // why the last check failed
+    }
+  | { kind: 'webhook'; token: string } // POST http://127.0.0.1:WEBHOOK_PORT/gatilho/<token>
+
+export const WEBHOOK_PORT = 47_717
+export const POLL_MINUTES = [1, 5, 15, 60]
+
 export interface Routine {
   id: string
   name: string
   agentId: string
   conversationId: string // the agent's DM or a channel it belongs to
   prompt: string
-  schedule: Schedule
+  schedule: Schedule // unused when there's a trigger
+  trigger?: Trigger
   enabled: boolean
   nextAt?: number // undefined while off
   lastAt?: number
@@ -320,13 +348,14 @@ export interface Routine {
   createdAt: number
 }
 
-export type RoutineInput = Pick<Routine, 'name' | 'agentId' | 'conversationId' | 'prompt' | 'schedule' | 'enabled'> & { id?: string; createdBy?: string }
+export type RoutineInput = Pick<Routine, 'name' | 'agentId' | 'conversationId' | 'prompt' | 'schedule' | 'enabled' | 'trigger'> & { id?: string; createdBy?: string }
 
 // What the routine's message in the conversation remembers about that run.
 export interface RoutineRun {
   name: string
   scheduledAt: number
   late: boolean // ran after the app came back, not at the time
+  event?: { source: string; title: string } // what triggered it, when not the clock
 }
 
 const DAY_LONG = ['domingo', 'segunda', 'terça', 'quarta', 'quinta', 'sexta', 'sábado']
@@ -363,3 +392,36 @@ export function describeSchedule(s: Schedule): string {
   if (s.once) return days.length === 7 ? `Uma vez, às ${hour}` : `Uma vez, ${days.map((d) => DAY_LONG[d]).join(' ou ')} às ${hour}`
   return `${when} às ${hour}`
 }
+
+// ---------- skills (spec §18) ----------
+
+// A recipe an agent follows for a kind of task ("how to run the Core tests").
+// Every agent it applies to sees its name and when to use it; the body is read
+// on demand. One an agent writes or changes waits for me, with a diff.
+export interface Skill {
+  id: string
+  name: string // short and unique among active skills, e.g. "testes-do-core"
+  description: string // when to use it, one line; goes in every prompt
+  body: string // the recipe, in Markdown
+  agents: string[] // the agents it applies to; empty: all
+  state: 'active' | 'pending' | 'archived'
+  replaces?: string // a pending change to this active skill
+  proposedBy?: string // the agent that proposed it (pending)
+  reason?: string // why, in the agent's words
+  createdAt: number
+  updatedAt: number
+}
+
+export interface SkillVersion {
+  id: number
+  skillId: string
+  name: string
+  description: string
+  body: string
+  by: string // 'me' or the agent whose proposal it was
+  at: number
+}
+
+export type SkillInput = Pick<Skill, 'name' | 'description' | 'body' | 'agents'> & { id?: string }
+
+export const skillApplies = (s: Skill, agentId: string): boolean => s.state === 'active' && (s.agents.length === 0 || s.agents.includes(agentId))

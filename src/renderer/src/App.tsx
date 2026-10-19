@@ -5,6 +5,7 @@ import { ConversationView } from './components/Conversation'
 import { AgentPage, ApprovalsPage, ConnectorsPage, SettingsPage, UsagePage } from './components/Pages'
 import { MemoryPage } from './components/Memory'
 import { RoutinesPage } from './components/Routines'
+import { SkillsPage } from './components/Skills'
 
 export function App(): ReactNode {
   const view = useStore((s) => s.view)
@@ -29,6 +30,7 @@ export function App(): ReactNode {
         {view.kind === 'connectors' && <ConnectorsPage />}
         {view.kind === 'memory' && <MemoryPage />}
         {view.kind === 'routines' && <RoutinesPage />}
+        {view.kind === 'skills' && <SkillsPage />}
         {view.kind === 'settings' && <SettingsPage />}
       </main>
     </div>

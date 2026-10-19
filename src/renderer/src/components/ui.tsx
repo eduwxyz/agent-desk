@@ -40,6 +40,14 @@ const PATHS: Record<string, ReactNode> = {
     </>
   ),
   terminal: <path d="m5 7 5 5-5 5M12 17h7" />,
+  zap: <path d="M13 3 4 14h7l-1 7 9-11h-7l1-7Z" />,
+  phone: (
+    <>
+      <rect x="7" y="2.5" width="10" height="19" rx="2" />
+      <path d="M11 18.5h2" />
+    </>
+  ),
+  layers: <path d="m12 3 9 5-9 5-9-5 9-5ZM3 13l9 5 9-5" />,
   folder: <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z" />,
   globe: (
     <>

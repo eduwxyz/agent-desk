@@ -1,5 +1,5 @@
 import { DatabaseSync } from 'node:sqlite'
-import { CACHE_READ_WEIGHT, type Agent, type AgentColor, type Approval, type ApprovalState, type Artifact, type ArtifactKind, type Author, type Connector, type ConnectorAuth, type ConnectorTool, type Conversation, type Effort, type LentFolder, type Memory, type MemoryMode, type MemoryState, type Message, type Project, type Receipt, type Routine, type RoutineRun, type Run, type Settings, type ToolClass } from '../shared/types'
+import { CACHE_READ_WEIGHT, type Agent, type AgentColor, type Approval, type ApprovalState, type Artifact, type ArtifactKind, type Author, type Connector, type ConnectorAuth, type ConnectorTool, type Conversation, type Effort, type LentFolder, type Memory, type MemoryMode, type MemoryState, type Message, type Project, type Receipt, type Routine, type RoutineRun, type Run, type Settings, type Skill, type SkillVersion, type ToolClass, type Trigger } from '../shared/types'
 
 // Each entry runs once, in order; PRAGMA user_version records how far we got.
 const MIGRATIONS = [
@@ -176,6 +176,32 @@ const MIGRATIONS = [
   `,
   `
   ALTER TABLE agents ADD COLUMN web INTEGER NOT NULL DEFAULT 1;
+  `,
+  `
+  ALTER TABLE routines ADD COLUMN trigger TEXT;
+  CREATE TABLE skills (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    description TEXT NOT NULL,
+    body TEXT NOT NULL,
+    agents TEXT NOT NULL DEFAULT '[]',
+    state TEXT NOT NULL CHECK (state IN ('active', 'pending', 'archived')),
+    replaces TEXT,
+    proposed_by TEXT,
+    reason TEXT,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  );
+  CREATE TABLE skill_versions (
+    id INTEGER PRIMARY KEY,
+    skill_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    description TEXT NOT NULL,
+    body TEXT NOT NULL,
+    by TEXT NOT NULL,
+    at INTEGER NOT NULL
+  );
+  CREATE INDEX skill_versions_by_skill ON skill_versions (skill_id, at);
   `
 ]
 
@@ -708,6 +734,7 @@ export class Db {
       lastAt: r['last_at'] == null ? undefined : Number(r['last_at']),
       lastMessageId: r['last_message_id'] ? str(r['last_message_id']) : undefined,
       createdBy: r['created_by'] ? str(r['created_by']) : undefined,
+      trigger: r['trigger'] ? (JSON.parse(str(r['trigger'])) as Trigger) : undefined,
       createdAt: Number(r['created_at'])
     }))
   }
@@ -719,11 +746,11 @@ export class Db {
   saveRoutine(r: Routine): void {
     this.db
       .prepare(
-        `INSERT INTO routines (id, name, agent_id, conversation_id, prompt, days, time, once, enabled, next_at, last_at, last_message_id, created_by, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `INSERT INTO routines (id, name, agent_id, conversation_id, prompt, days, time, once, enabled, next_at, last_at, last_message_id, created_by, created_at, trigger)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT (id) DO UPDATE SET name = excluded.name, agent_id = excluded.agent_id, conversation_id = excluded.conversation_id, prompt = excluded.prompt,
            days = excluded.days, time = excluded.time, once = excluded.once, enabled = excluded.enabled, next_at = excluded.next_at, last_at = excluded.last_at,
-           last_message_id = excluded.last_message_id`
+           last_message_id = excluded.last_message_id, trigger = excluded.trigger`
       )
       .run(
         r.id,
@@ -739,11 +766,65 @@ export class Db {
         r.lastAt ?? null,
         r.lastMessageId ?? null,
         r.createdBy ?? null,
-        r.createdAt
+        r.createdAt,
+        r.trigger ? JSON.stringify(r.trigger) : null
       )
   }
 
   removeRoutine(id: string): void {
     this.db.prepare('DELETE FROM routines WHERE id = ?').run(id)
+  }
+
+  // ---------- skills ----------
+
+  skills(): Skill[] {
+    return (this.db.prepare('SELECT * FROM skills ORDER BY name').all() as Row[]).map((r) => ({
+      id: str(r['id']),
+      name: str(r['name']),
+      description: str(r['description']),
+      body: str(r['body']),
+      agents: JSON.parse(str(r['agents']) || '[]') as string[],
+      state: str(r['state']) as Skill['state'],
+      replaces: r['replaces'] ? str(r['replaces']) : undefined,
+      proposedBy: r['proposed_by'] ? str(r['proposed_by']) : undefined,
+      reason: r['reason'] ? str(r['reason']) : undefined,
+      createdAt: Number(r['created_at']),
+      updatedAt: Number(r['updated_at'])
+    }))
+  }
+
+  skill(id: string): Skill | undefined {
+    return this.skills().find((s) => s.id === id)
+  }
+
+  saveSkill(k: Skill): void {
+    this.db
+      .prepare(
+        `INSERT INTO skills (id, name, description, body, agents, state, replaces, proposed_by, reason, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (id) DO UPDATE SET name = excluded.name, description = excluded.description, body = excluded.body, agents = excluded.agents,
+           state = excluded.state, replaces = excluded.replaces, proposed_by = excluded.proposed_by, reason = excluded.reason, updated_at = excluded.updated_at`
+      )
+      .run(k.id, k.name, k.description, k.body, JSON.stringify(k.agents), k.state, k.replaces ?? null, k.proposedBy ?? null, k.reason ?? null, k.createdAt, k.updatedAt)
+  }
+
+  removeSkill(id: string): void {
+    this.db.prepare('DELETE FROM skills WHERE id = ?').run(id)
+  }
+
+  // What a skill was before each change, newest first.
+  skillVersions(skillId: string): SkillVersion[] {
+    return (this.db.prepare('SELECT * FROM skill_versions WHERE skill_id = ? ORDER BY at DESC, id DESC').all(skillId) as Row[]).map((r) => ({
+      id: Number(r['id']),
+      skillId: str(r['skill_id']),
+      name: str(r['name']),
+      description: str(r['description']),
+      body: str(r['body']),
+      by: str(r['by']),
+      at: Number(r['at'])
+    }))
+  }
+
+  addSkillVersion(v: Omit<SkillVersion, 'id'>): void {
+    this.db.prepare('INSERT INTO skill_versions (skill_id, name, description, body, by, at) VALUES (?, ?, ?, ?, ?, ?)').run(v.skillId, v.name, v.description, v.body, v.by, v.at)
   }
 }

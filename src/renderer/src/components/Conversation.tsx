@@ -251,6 +251,11 @@ function RoutineMessage({ message }: { message: Message }): ReactNode {
           {info?.late && <span className="tag tag--warn">atrasada · era {time(info.scheduledAt)}</span>}
           <span className="msg__time">{time(message.at)}</span>
         </div>
+        {info?.event && (
+          <div className="note routine-event">
+            <Icon name="zap" size={12} /> {info.event.source}: <strong>{info.event.title}</strong>
+          </div>
+        )}
         <div className="md">
           <Markdown remarkPlugins={[remarkGfm]}>{highlightMentions(message.text)}</Markdown>
         </div>

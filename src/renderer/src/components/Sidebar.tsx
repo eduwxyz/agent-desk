@@ -30,6 +30,7 @@ export function Sidebar(): ReactNode {
   const dms = s.conversations.filter((c) => c.kind === 'dm')
   const pending = pendingApprovals(s).length
   const suggestions = pendingMemories(s).length
+  const proposals = s.skills.filter((k) => k.state === 'pending').length
   const [adding, setAdding] = useState(false)
   const [name, setName] = useState('')
 
@@ -62,6 +63,7 @@ export function Sidebar(): ReactNode {
         <NavItem view={{ kind: 'approvals' }} icon="shield" label="Aprovações" badge={pending} />
         <NavItem view={{ kind: 'memory' }} icon="book" label="Memória" badge={suggestions} />
         <NavItem view={{ kind: 'routines' }} icon="clock" label="Rotinas" />
+        <NavItem view={{ kind: 'skills' }} icon="layers" label="Skills" badge={proposals} />
 
         <div className="section">
           <div className="section__head">

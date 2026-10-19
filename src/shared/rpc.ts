@@ -1,5 +1,5 @@
 // The contract between the renderer and the core, carried over a MessagePort.
-import type { Agent, Approval, Artifact, ComputerInfo, Connector, ConnectorInput, ConnectorTool, Conversation, EngineId, Memory, MemoryScope, Message, Project, Routine, RoutineInput, Settings } from './types'
+import type { Agent, Approval, Artifact, ComputerInfo, Connector, ConnectorInput, ConnectorTool, Conversation, EngineId, Memory, MemoryScope, Message, Project, Routine, RoutineInput, Settings, Skill, SkillInput, SkillVersion, Trigger } from './types'
 
 export interface Snapshot {
   settings: Settings
@@ -12,6 +12,7 @@ export interface Snapshot {
   artifacts: Artifact[]
   computers: ComputerInfo[]
   routines: Routine[]
+  skills: Skill[]
   packaged: boolean // installed app, not `npm run dev` (opening at login only works there)
   demoServer?: { command: string; args: string[] } // the bundled demo connector, when available
 }
@@ -50,6 +51,15 @@ export interface Api {
   openExternal(p: { url: string }): void
   saveRoutine(p: { routine: RoutineInput }): Routine // throws a message for the form
   setJevKey(p: { key: string | null }): Promise<void> // checks the key with TypeSafe; throws why it's refused
+  saveSkill(p: { skill: SkillInput }): Skill // throws a message for the form
+  decideSkill(p: { id: string; approve: boolean }): void
+  restoreSkill(p: { skillId: string; versionId: number }): void
+  archiveSkill(p: { id: string; archived: boolean }): void
+  removeSkill(p: { id: string }): void
+  skillVersions(p: { skillId: string }): SkillVersion[]
+  checkTrigger(p: { trigger: Trigger }): Promise<string> // what a connector check finds now, for the form
+  setTelegramToken(p: { token: string | null }): Promise<void> // checks it with Telegram; throws why it's refused
+  unpairTelegram(): void
   removeRoutine(p: { id: string }): void
   runRoutine(p: { id: string }): void
 }
@@ -73,6 +83,8 @@ export type CoreEvent =
   | { type: 'artifact'; artifact: Artifact }
   | { type: 'routine'; routine: Routine }
   | { type: 'routine_removed'; id: string }
+  | { type: 'skill'; skill: Skill }
+  | { type: 'skill_removed'; id: string }
 
 export type Request = { id: number; method: Method; params: unknown }
 export type Response = { id: number; result?: unknown; error?: string }

@@ -20,7 +20,11 @@ import {
   type Project,
   type Routine,
   type RoutineInput,
-  type Settings
+  type Settings,
+  type Skill,
+  type SkillInput,
+  type SkillVersion,
+  type Trigger
 } from '../../shared/types'
 import { call, connect } from './rpc'
 
@@ -35,6 +39,7 @@ export type View =
   | { kind: 'connectors' }
   | { kind: 'memory' }
   | { kind: 'routines' }
+  | { kind: 'skills' }
   | { kind: 'settings' }
 
 export interface State {
@@ -52,6 +57,7 @@ export interface State {
   artifacts: Artifact[]
   computers: ComputerInfo[]
   routines: Routine[]
+  skills: Skill[]
   packaged: boolean
   panel: Panel | null // the side panel next to a conversation
   demoServer?: { command: string; args: string[] }
@@ -92,6 +98,7 @@ let state: State = {
   artifacts: [],
   computers: [],
   routines: [],
+  skills: [],
   packaged: false,
   panel: null
 }
@@ -189,6 +196,10 @@ function apply(e: CoreEvent): void {
         return { ...s, routines: upsert(s.routines, e.routine) }
       case 'routine_removed':
         return { ...s, routines: s.routines.filter((r) => r.id !== e.id) }
+      case 'skill':
+        return { ...s, skills: upsert(s.skills, e.skill).sort((a, b) => a.name.localeCompare(b.name)) }
+      case 'skill_removed':
+        return { ...s, skills: s.skills.filter((k) => k.id !== e.id) }
     }
   })
 }
@@ -213,6 +224,7 @@ export async function start(): Promise<void> {
       artifacts: snap.artifacts,
       computers: snap.computers,
       routines: snap.routines,
+      skills: snap.skills,
       packaged: snap.packaged,
       demoServer: snap.demoServer
     }
@@ -333,6 +345,15 @@ export const openExternal = (url: string): void => void call('openExternal', { u
 
 export const saveRoutine = (routine: RoutineInput): Promise<Routine> => call('saveRoutine', { routine })
 export const setJevKey = (key: string | null): Promise<void> => call('setJevKey', { key })
+export const saveSkill = (skill: SkillInput): Promise<Skill> => call('saveSkill', { skill })
+export const decideSkill = (id: string, approve: boolean): void => void call('decideSkill', { id, approve })
+export const restoreSkill = (skillId: string, versionId: number): void => void call('restoreSkill', { skillId, versionId })
+export const archiveSkill = (id: string, archived: boolean): void => void call('archiveSkill', { id, archived })
+export const removeSkill = (id: string): void => void call('removeSkill', { id })
+export const skillVersions = (skillId: string): Promise<SkillVersion[]> => call('skillVersions', { skillId })
+export const checkTrigger = (trigger: Trigger): Promise<string> => call('checkTrigger', { trigger })
+export const setTelegramToken = (token: string | null): Promise<void> => call('setTelegramToken', { token })
+export const unpairTelegram = (): void => void call('unpairTelegram')
 export const removeRoutine = (id: string): void => void call('removeRoutine', { id })
 export const runRoutine = (id: string): void => void call('runRoutine', { id })
 // The id of the DM with an agent, created if it doesn't exist yet, without opening it.

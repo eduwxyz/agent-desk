@@ -8,7 +8,7 @@ import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import type { MessagePortMain } from 'electron'
 import type { Api, CoreEvent, Method, Request, Wire } from '../shared/rpc'
-import { ENGINES, type Agent, type EngineId, type EngineStatus, type Settings } from '../shared/types'
+import { ENGINES, WEBHOOK_PORT, type Agent, type EngineId, type EngineStatus, type Settings } from '../shared/types'
 import { Db } from './db'
 import { claudeEngine } from './engines/claude'
 import { codexEngine } from './engines/codex'
@@ -17,7 +17,10 @@ import { fakeEngine } from './engines/fake'
 import type { Engine } from './engines/types'
 import { ConnectorManager } from './connectors'
 import { Gateway } from './gateway'
+import { createServer } from 'node:http'
 import { checkJevKey, JEV_MODEL, JEV_SECRET } from './jev'
+import { Skills } from './skills'
+import { Telegram } from './telegram'
 import { mainCipher, plainCipher, Secrets } from './secrets'
 import { checkFolder, Computers, folderName, type Shooter } from './computer'
 import { Memories } from './memory'
@@ -60,7 +63,7 @@ async function detect(): Promise<void> {
 const gateway = new Gateway()
 const ready = Promise.all([gateway.start(), (fake ? Promise.resolve() : adoptLoginShellPath()).then(detect)])
 
-const settings = (): Settings => ({ ...db.getSettings(DEFAULTS), engines, jevKey: db.getSecret(JEV_SECRET) !== undefined })
+const settings = (): Settings => ({ ...db.getSettings(DEFAULTS), engines, jevKey: db.getSecret(JEV_SECRET) !== undefined, telegram: telegram?.info() })
 
 const engineImpls: Record<EngineId, Engine> = fake
   ? { claude: fakeEngine('claude'), codex: fakeEngine('codex') }
@@ -72,6 +75,29 @@ const ports = new Set<MessagePortMain>()
 function emit(event: CoreEvent): void {
   const wire: Wire = { event }
   for (const p of ports) p.postMessage(wire)
+  toPhone(event)
+}
+
+// The phone gets each new approval and question as it happens (spec §19).
+let telegram: Telegram | undefined
+const sentToPhone = new Set<string>()
+function toPhone(e: CoreEvent): void {
+  if (!telegram) return
+  const name = (id: string): string => db.agent(id)?.name ?? 'Um agente'
+  if (e.type === 'approval' && e.approval.state === 'pending' && !sentToPhone.has(e.approval.id)) {
+    sentToPhone.add(e.approval.id)
+    void telegram.approvalAsked(e.approval, name(e.approval.agentId))
+  } else if (e.type === 'message' && e.message.run?.status === 'waiting_input' && e.message.run.question && e.message.author.kind === 'agent' && !sentToPhone.has(e.message.id)) {
+    sentToPhone.add(e.message.id)
+    const conv = db.conversation(e.message.conversationId)
+    void telegram.questionAsked(e.message, name(e.message.author.id), conv?.kind === 'channel' ? `#${conv.name}` : 'na DM')
+  }
+}
+
+// Desktop notification, and the same on the phone.
+const notifyAll = (title: string, body: string, conversationId?: string): void => {
+  toMain({ type: 'notify', title, body, conversationId })
+  void telegram?.notice(title, body)
 }
 
 // Asks the main process to do what only it can: open the browser or a folder, show a notification.
@@ -125,9 +151,12 @@ const computers = new Computers({ db, dataDir, emit, shoot })
 const routines = new Routines({
   db,
   runner: { runRoutine: (r, when) => runner.runRoutine(r, when) },
+  connectors: { call: (id, tool, args) => connectors.call(id, tool, args), list: () => connectors.list() },
   emit,
-  notify: (title, body, conversationId) => toMain({ type: 'notify', title, body, conversationId })
+  notify: notifyAll
 })
+
+const skills = new Skills({ db, emit, notify: (title, body) => notifyAll(title, body) })
 
 const runner = new Runner({
   db,
@@ -140,10 +169,39 @@ const runner = new Runner({
   memory,
   computers,
   routines,
-  notify: (title, body, conversationId) => toMain({ type: 'notify', title, body, conversationId }),
+  skills,
+  // Approvals reach the phone with their buttons, through toPhone.
+  notify: (title, body, conversationId, kind) => (kind === 'approval' ? toMain({ type: 'notify', title, body, conversationId }) : notifyAll(title, body, conversationId)),
   jev: { key: () => secrets.get(JEV_SECRET) },
   onBusy: (busy) => toMain({ type: 'busy', busy })
 })
+
+telegram = new Telegram({
+  secrets,
+  decide: (id, decision, reason) => runner.decide(id, decision, reason),
+  approval: (id) => db.approval(id),
+  answer: (conversationId, text) => void runner.send(conversationId, text),
+  changed: () => emit({ type: 'settings', settings: settings() })
+})
+
+// Routines started by something on this Mac: POST http://127.0.0.1:WEBHOOK_PORT/gatilho/<token>.
+const hooks = createServer((req, res) => {
+  const m = /^\/gatilho\/([\w-]{10,})$/.exec(req.url ?? '')
+  if (req.method !== 'POST' || !m) return void res.writeHead(404).end('Use POST /gatilho/<código>\n')
+  let body = ''
+  let tooBig = false
+  req.setEncoding('utf8')
+  req.on('data', (chunk: string) => {
+    body += chunk
+    if (body.length > 64_000) tooBig = true
+  })
+  req.on('end', () => {
+    if (tooBig) return void res.writeHead(413).end('Grande demais (máx. 64 KB).\n')
+    const r = routines.webhook(m[1]!, body)
+    res.writeHead(r === 'ok' ? 202 : r === 'busy' ? 409 : 404).end(r === 'ok' ? 'Rotina disparada.\n' : r === 'busy' ? 'A rotina ainda está rodando.\n' : 'Nenhuma rotina ligada com esse endereço.\n')
+  })
+})
+hooks.on('error', (e) => console.error(`[gatilhos] porta ${WEBHOOK_PORT}:`, e.message))
 
 
 void ready.then(async () => {
@@ -153,6 +211,10 @@ void ready.then(async () => {
   await runner.expireApprovals()
   setInterval(() => void runner.expireApprovals(), 60_000).unref()
   routines.start()
+  if (!fake) {
+    hooks.listen(WEBHOOK_PORT, '127.0.0.1')
+    void telegram?.start()
+  }
 })
 toMain({ type: 'login_item', open: !!settings().openAtLogin })
 
@@ -190,6 +252,7 @@ const api: Api = {
     artifacts: db.artifacts(),
     computers: db.agents().map((a) => computers.info(a)),
     routines: db.routines(),
+    skills: db.skills(),
     packaged: process.env['AGENT_DESK_PACKAGED'] === '1',
     demoServer: existsSync(demoPath) ? { command: 'node', args: [demoPath] } : undefined
   }),
@@ -232,6 +295,18 @@ const api: Api = {
     emitConversations([id])
     return id
   },
+
+  saveSkill: ({ skill }) => skills.save(skill),
+  decideSkill: ({ id, approve }) => void skills.decide(id, approve),
+  restoreSkill: ({ skillId, versionId }) => void skills.restore(skillId, versionId),
+  archiveSkill: ({ id, archived }) => void skills.archive(id, archived),
+  removeSkill: ({ id }) => skills.remove(id),
+  skillVersions: ({ skillId }) => db.skillVersions(skillId),
+
+  checkTrigger: ({ trigger }) => routines.preview(trigger),
+
+  setTelegramToken: ({ token }) => telegram!.setToken(token),
+  unpairTelegram: () => void telegram?.unpair(),
 
   // Checked with TypeSafe before it's saved; null removes it.
   setJevKey: async ({ key }) => {

@@ -22,6 +22,9 @@ import {
   updateTool,
   updateSettings,
   setJevKey,
+  setTelegramToken,
+  unpairTelegram,
+  type TelegramInfo,
   useStore,
   EFFORTS,
   ENGINES,
@@ -1006,6 +1009,71 @@ export function Toggle({ on, onChange }: { on: boolean; onChange: (v: boolean) =
 
 // ---------- Settings ----------
 
+// The phone (spec §19): a Telegram bot of the user's own, paired with a code.
+function PhoneCard({ info }: { info?: TelegramInfo }): ReactNode {
+  const [token, setToken] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const save = (value: string | null): void => {
+    setBusy(true)
+    setError('')
+    setTelegramToken(value)
+      .then(() => setToken(''))
+      .catch((e: unknown) => setError(e instanceof Error ? e.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '') : String(e)))
+      .finally(() => setBusy(false))
+  }
+  return (
+    <Card title="Celular (Telegram)" lead="Aprovações com botões, as perguntas dos agentes (você responde respondendo à mensagem) e o fim das rotinas, no seu Telegram. Útil pra rotina que pede aprovação de madrugada.">
+      {!info?.bot ? (
+        <>
+          <ol className="small steps-list">
+            <li>
+              No Telegram, abra o <strong>@BotFather</strong>, mande <code>/newbot</code> e escolha um nome.
+            </li>
+            <li>Ele devolve um token (algo como <code>123456:ABC…</code>). Cole aqui:</li>
+          </ol>
+          <div className="row">
+            <input className="grow" type="password" value={token} placeholder="Token do bot" onChange={(e) => setToken(e.target.value)} />
+            <button className="btn" disabled={busy || !token.trim()} onClick={() => save(token)}>
+              {busy ? 'Conferindo…' : 'Salvar'}
+            </button>
+          </div>
+        </>
+      ) : !info.chat ? (
+        <div className="stack">
+          <p className="small">
+            Agora abra o <strong>{info.bot}</strong> no Telegram e mande:
+          </p>
+          <p>
+            <code className="phone-code">/start {info.code}</code>
+          </p>
+          <p className="muted small">Só quem mandar este código fica com o bot. Esperando…</p>
+          <button className="btn btn--sm btn--ghost" onClick={() => save(null)}>
+            Trocar de bot
+          </button>
+        </div>
+      ) : (
+        <div className="row row--center">
+          <span className="tag tag--ok">Pareado</span>
+          <span className="small grow">
+            {info.bot} manda pra <strong>{info.chat}</strong>.
+          </span>
+          <button className="btn btn--sm btn--ghost" onClick={() => unpairTelegram()}>
+            Desparear
+          </button>
+          <button className="btn btn--sm btn--ghost" onClick={() => save(null)}>
+            Remover bot
+          </button>
+        </div>
+      )}
+      {(error || info?.error) && <p className="note note--error">{error || `O Telegram não está respondendo: ${info?.error}`}</p>}
+      <p className="hint">
+        <Icon name="shield" size={13} /> O Telegram recebe o texto das aprovações e perguntas (ferramenta, argumentos, motivo). O token fica no cofre do Mac. Uma ação de alto risco pede dois toques.
+      </p>
+    </Card>
+  )
+}
+
 // The TypeSafe key for the Jev router: checked by the core, kept encrypted, never shown again.
 function JevKey({ saved }: { saved: boolean }): ReactNode {
   const [key, setKey] = useState('')
@@ -1119,6 +1187,8 @@ export function SettingsPage(): ReactNode {
           </Field>
           {settings.routerModel === 'jev' && <JevKey saved={!!settings.jevKey} />}
         </Card>
+
+        <PhoneCard info={settings.telegram} />
 
         <Card title="Memória" lead="Um modelo pequeno resume o que sai da janela de cada conversa e, do mesmo trecho, tira o que vale lembrar sobre você.">
           <div className="grid2">

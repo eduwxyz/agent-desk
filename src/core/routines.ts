@@ -1,11 +1,13 @@
 // Routines (spec §14): a request scheduled for an agent, posted in a
 // conversation at a day and time. A tick every 30 s runs whatever is due, so
 // it also catches up after the Mac wakes or the app opens again.
-import { randomUUID } from 'node:crypto'
+import { createHash, randomBytes, randomUUID } from 'node:crypto'
+import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
 import type { CoreEvent } from '../shared/rpc'
-import { describeSchedule, nextRun, validTime, type Agent, type Conversation, type Message, type Routine, type RoutineInput } from '../shared/types'
+import { describeSchedule, nextRun, validTime, type Agent, type Connector, type Conversation, type Message, type Routine, type RoutineInput, type Trigger } from '../shared/types'
 import type { Db } from './db'
 import type { ToolDef } from './gateway'
+import type { RoutineEvent } from './runs'
 
 export const TICK_MS = 30_000
 export const LATE_GRACE_MS = 12 * 3_600_000 // a run missed by more than this is skipped
@@ -49,9 +51,13 @@ export const whenText = (at: number): string =>
 
 type ToolOutcome = { routine?: Routine; reply: string; error?: boolean }
 
+const MAX_SEEN = 500 // item ids remembered per connector trigger
+const MAX_EVENT_CHARS = 6_000
+
 export interface RoutineDeps {
   db: Db
-  runner: { runRoutine(r: Routine, when: { scheduledAt: number; late: boolean }): Promise<Message | undefined> }
+  runner: { runRoutine(r: Routine, when: { scheduledAt: number; late: boolean; event?: RoutineEvent }): Promise<Message | undefined> }
+  connectors?: { call(id: string, tool: string, args: Record<string, unknown>): Promise<CallToolResult>; list(): Connector[] }
   emit: (e: CoreEvent) => void
   notify?: (title: string, body: string, conversationId: string) => void
   now?: () => number
@@ -59,6 +65,7 @@ export interface RoutineDeps {
 
 export class Routines {
   private running = new Set<string>()
+  private checking = new Set<string>()
   private runs = new Set<Promise<void>>()
   private timer: NodeJS.Timeout | null = null
   private awake = true
@@ -92,7 +99,8 @@ export class Routines {
     if (!this.awake) return
     const now = this.now()
     for (const r of this.deps.db.routines()) {
-      if (!r.enabled || r.nextAt === undefined || r.nextAt > now) continue
+      if (r.enabled && r.trigger?.kind === 'poll' && now - (r.trigger.checkedAt ?? 0) >= r.trigger.everyMinutes * 60_000) void this.check(r)
+      if (!r.enabled || r.trigger || r.nextAt === undefined || r.nextAt > now) continue
       const scheduledAt = r.nextAt
       this.store(r.schedule.once ? { ...r, enabled: false, nextAt: undefined } : { ...r, nextAt: nextRun(r.schedule, now) })
       if (now - scheduledAt > LATE_GRACE_MS) continue
@@ -111,10 +119,11 @@ export class Routines {
     if (!prompt) throw new Error('Escreva o que o agente deve fazer.')
     if (!agent || agent.archived) throw new Error('Escolha um agente.')
     if (!conv || !(conv.kind === 'dm' ? conv.name === agent.id : conv.members.includes(agent.id))) throw new Error(`Escolha a DM com ${agent.name} ou um canal de que ele participa.`)
-    if (days.length === 0) throw new Error('Escolha pelo menos um dia.')
-    if (!validTime(input.schedule.time)) throw new Error('Horário inválido.')
-
     const prev = input.id ? db.routine(input.id) : undefined
+    const trigger = input.trigger && this.cleanTrigger(input.trigger, prev?.trigger)
+    if (!trigger && days.length === 0) throw new Error('Escolha pelo menos um dia.')
+    if (!trigger && !validTime(input.schedule.time)) throw new Error('Horário inválido.')
+
     const schedule = { days, time: input.schedule.time, ...(input.schedule.once ? { once: true } : {}) }
     const r: Routine = {
       ...prev,
@@ -124,13 +133,81 @@ export class Routines {
       conversationId: conv.id,
       prompt,
       schedule,
+      trigger,
       enabled: input.enabled,
-      nextAt: input.enabled ? nextRun(schedule, this.now()) : undefined,
+      nextAt: input.enabled && !trigger ? nextRun(schedule, this.now()) : undefined,
       createdBy: prev ? prev.createdBy : input.createdBy,
       createdAt: prev?.createdAt ?? this.now()
     }
     this.store(r)
+    if (r.enabled && trigger?.kind === 'poll' && trigger.seen === undefined) void this.check(r) // what's there now doesn't fire
     return r
+  }
+
+  // A connector trigger keeps what it has seen while the same check is kept;
+  // a webhook keeps its address.
+  private cleanTrigger(t: Trigger, prev?: Trigger): Trigger {
+    if (t.kind === 'webhook') return { kind: 'webhook', token: prev?.kind === 'webhook' ? prev.token : randomBytes(18).toString('base64url') }
+    const tool = this.deps.db.tools(t.connectorId).find((x) => x.name === t.tool)
+    if (!this.deps.connectors?.list().some((c) => c.id === t.connectorId)) throw new Error('Escolha um conector.')
+    if (!tool || !tool.enabled || tool.cls !== 'read') throw new Error('Escolha uma ferramenta de leitura do conector.')
+    const everyMinutes = Math.max(1, Math.round(t.everyMinutes))
+    const same = prev?.kind === 'poll' && prev.connectorId === t.connectorId && prev.tool === t.tool && JSON.stringify(prev.args) === JSON.stringify(t.args)
+    return { kind: 'poll', connectorId: t.connectorId, tool: t.tool, args: t.args, everyMinutes, ...(same ? { seen: prev.seen, checkedAt: prev.checkedAt } : {}) }
+  }
+
+  // What the check finds right now, for the form ("Testar").
+  async preview(t: Trigger): Promise<string> {
+    if (t.kind !== 'poll') return ''
+    const { items } = await this.look(t)
+    if (items.length === 1 && items[0]!.whole) return 'A resposta não é uma lista: a rotina vai rodar quando ela mudar.'
+    return `Achei ${items.length} ${items.length === 1 ? 'item' : 'itens'} agora${items.length ? `: ${items.slice(0, 3).map((i) => i.title).join('; ')}${items.length > 3 ? '…' : ''}` : ''}. Eles não disparam: a rotina roda pros que aparecerem depois.`
+  }
+
+  private async look(t: Extract<Trigger, { kind: 'poll' }>): Promise<{ items: EventItem[]; source: string }> {
+    const connector = this.deps.connectors?.list().find((c) => c.id === t.connectorId)
+    if (!this.deps.connectors || !connector) throw new Error('o conector não existe mais')
+    const tool = this.deps.db.tools(t.connectorId).find((x) => x.name === t.tool)
+    if (!tool || !tool.enabled || tool.cls !== 'read') throw new Error(`a ferramenta ${t.tool} não está liberada como leitura`)
+    const r = await this.deps.connectors.call(t.connectorId, t.tool, t.args)
+    const text = r.content.map((c) => (c.type === 'text' ? c.text : '')).join('\n')
+    if (r.isError) throw new Error(text.slice(0, 200) || 'a ferramenta deu erro')
+    return { items: eventItems(text), source: `${connector.name} · ${t.tool}` }
+  }
+
+  // One check of a connector trigger. The first one only learns what's there;
+  // after that, the first new item runs the routine (one run at a time), and
+  // the rest wait for the next check, which comes right after that run.
+  private async check(r: Routine): Promise<void> {
+    if (r.trigger?.kind !== 'poll' || this.checking.has(r.id) || this.running.has(r.id)) return
+    this.checking.add(r.id)
+    const t = r.trigger
+    try {
+      const { items, source } = await this.look(t)
+      const latest = this.deps.db.routine(r.id)
+      if (latest?.trigger?.kind !== 'poll') return
+      const seen = latest.trigger.seen
+      const fresh = seen ? items.filter((i) => !seen.includes(i.key)) : []
+      const next = fresh[0]
+      const keep = [...(seen ?? items.map((i) => i.key)), ...(next ? [next.key] : [])].slice(-MAX_SEEN)
+      this.store({ ...latest, trigger: { ...latest.trigger, seen: keep, checkedAt: this.now(), error: undefined } })
+      if (next && latest.enabled) this.fire(r.id, { scheduledAt: this.now(), late: false, event: { source, title: next.title, body: next.body } }, fresh.length > 1)
+    } catch (e) {
+      const latest = this.deps.db.routine(r.id)
+      if (latest?.trigger?.kind === 'poll') this.store({ ...latest, trigger: { ...latest.trigger, checkedAt: this.now(), error: e instanceof Error ? e.message : String(e) } })
+    } finally {
+      this.checking.delete(r.id)
+    }
+  }
+
+  // A call to http://127.0.0.1:WEBHOOK_PORT/gatilho/<token>, from something on this Mac.
+  webhook(token: string, body: string): 'ok' | 'unknown' | 'busy' {
+    const r = this.deps.db.routines().find((x) => x.trigger?.kind === 'webhook' && x.trigger.token === token)
+    if (!r || !r.enabled) return 'unknown'
+    if (this.running.has(r.id)) return 'busy'
+    const text = body.trim()
+    this.fire(r.id, { scheduledAt: this.now(), late: false, event: { source: 'chamada local', title: text.split('\n')[0]!.slice(0, 120) || 'chamada sem conteúdo', body: text.slice(0, MAX_EVENT_CHARS) || '(vazio)' } })
+    return 'ok'
   }
 
   // The agent's own routines, for its prompt.
@@ -198,7 +275,8 @@ export class Routines {
   }
 
   // One run of a routine at a time: if the last one is still going, this one skips.
-  private fire(id: string, when: { scheduledAt: number; late: boolean }): void {
+  // `more`: a connector check left new items, so check again when this run ends.
+  private fire(id: string, when: { scheduledAt: number; late: boolean; event?: RoutineEvent }, more = false): void {
     const r = this.deps.db.routine(id)
     if (!r || this.running.has(id)) return
     this.running.add(id)
@@ -214,6 +292,8 @@ export class Routines {
       .finally(() => {
         this.running.delete(id)
         this.runs.delete(run)
+        const latest = this.deps.db.routine(id)
+        if (more && latest?.trigger?.kind === 'poll') void this.check(latest)
       })
     this.runs.add(run)
   }
@@ -243,4 +323,45 @@ export function outcome(reply: Message): string {
     .replace(/\s+/g, ' ')
     .trim()
   return plain.length > 140 ? `${plain.slice(0, 139)}…` : plain || 'Terminou.'
+}
+
+interface EventItem {
+  key: string
+  title: string
+  body: string
+  whole?: boolean // the result isn't a list: the item is the whole result, new when it changes
+}
+
+const hash = (s: string): string => createHash('sha1').update(s).digest('hex').slice(0, 16)
+
+// The items in a read tool's result: the first list of objects in its JSON
+// (Linear's issues, GitHub's runs, Gmail's messages…), each keyed by its id.
+export function eventItems(text: string): EventItem[] {
+  let data: unknown
+  try {
+    data = JSON.parse(text)
+  } catch {
+    return [{ key: hash(text), title: 'a resposta mudou', body: text.slice(0, MAX_EVENT_CHARS), whole: true }]
+  }
+  const list = findList(data, 0)
+  if (!list) return [{ key: hash(text), title: 'a resposta mudou', body: text.slice(0, MAX_EVENT_CHARS), whole: true }]
+  return list.map((o) => {
+    const pick = (...keys: string[]): string | undefined => keys.map((k) => o[k]).find((v): v is string | number => typeof v === 'string' || typeof v === 'number')?.toString()
+    const json = JSON.stringify(o, null, 1)
+    const id = pick('id', 'identifier', 'number', 'url', 'key')
+    const title = pick('title', 'name', 'subject', 'summary') ?? id ?? json.slice(0, 80)
+    // Linear's id is already the readable one (OAB-65); a uuid isn't.
+    const ref = pick('identifier', 'number', 'key') ?? (id && id.length <= 20 && !/^[0-9a-f-]+$/i.test(id) ? id : undefined)
+    return { key: id ?? hash(json), title: ref && ref !== title ? `${ref} · ${title}` : title, body: json.slice(0, MAX_EVENT_CHARS) }
+  })
+}
+
+function findList(v: unknown, depth: number): Record<string, unknown>[] | undefined {
+  if (Array.isArray(v)) return v.length === 0 || v.every((x) => x && typeof x === 'object' && !Array.isArray(x)) ? (v as Record<string, unknown>[]) : undefined
+  if (!v || typeof v !== 'object' || depth > 3) return undefined
+  for (const x of Object.values(v)) {
+    const found = findList(x, depth + 1)
+    if (found) return found
+  }
+  return undefined
 }
