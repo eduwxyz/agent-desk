@@ -557,3 +557,6 @@ process.parentPort.on('message', (e) => {
 })
 
 process.on('exit', () => db.close())
+// The app stops the core with SIGTERM, which by default skips the 'exit' handlers
+// above and leaves the agents' Chromes running with nothing to drive them.
+process.on('SIGTERM', () => process.exit(0))
