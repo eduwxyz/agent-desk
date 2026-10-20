@@ -5,7 +5,7 @@ import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { agentById, artifactUrl, browserAction, browserOf, computerOf, openExternal, openPanel, stopService, useStore, type Artifact } from '../store'
 import { call } from '../rpc'
-import { Icon } from './ui'
+import { Icon, type IconName } from './ui'
 
 const KIND_LABEL: Record<Artifact['kind'], string> = {
   image: 'Imagem',
@@ -76,13 +76,194 @@ export function ServiceCard({ agentId, name }: { agentId: string; name: string }
   )
 }
 
-// The agent's browser, from a message where it used it: the page as it is now.
-export function BrowserCard({ agentId }: { agentId: string }): ReactNode {
+// ---------- the agent's browser, live ----------
+
+const LOG_ICON: Record<string, IconName> = {
+  Abriu: 'globe',
+  Clicou: 'pointer',
+  'Clicou (aprovado)': 'pointer',
+  Escreveu: 'edit',
+  Apertou: 'keyboard',
+  Rolou: 'down',
+  Voltou: 'back',
+  'Leu a página': 'book',
+  'Olhou a tela': 'eye',
+  Esperou: 'clock'
+}
+const logIcon = (label: string): IconName => LOG_ICON[label] ?? (/assumiu|devolveu/.test(label) ? 'hand' : 'spark')
+const clock = (at: number): string => new Date(at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+
+// Live while the agent is answering with it, or while I drive it.
+function useLive(agentId: string): boolean {
+  const working = useStore((s) => s.messages.some((m) => m.author.kind === 'agent' && m.author.id === agentId && m.run?.status === 'working'))
+  const view = useStore((s) => browserOf(s, agentId))
+  return working || !!view?.doing || !!view?.shown
+}
+
+function LiveBadge({ agentId }: { agentId: string }): ReactNode {
+  return useLive(agentId) ? (
+    <span className="live-badge">
+      <i />
+      ao vivo
+    </span>
+  ) : null
+}
+
+// The address as a browser shows it: the site in bold, the rest muted.
+function UrlBar({ url }: { url: string }): ReactNode {
+  let host = url
+  let rest = ''
+  let secure = false
+  try {
+    const u = new URL(url)
+    host = u.host.replace(/^www\./, '')
+    rest = `${u.pathname === '/' ? '' : u.pathname}${u.search}`
+    secure = u.protocol === 'https:'
+  } catch {}
+  return (
+    <span className="url-bar" title={url}>
+      <Icon name={secure ? 'lock' : 'globe'} size={11} />
+      <span className="url-bar__text">
+        <strong>{host || 'Nenhuma página'}</strong>
+        {rest && <span>{rest}</span>}
+      </span>
+    </span>
+  )
+}
+
+// The screen: what Chrome streams, with the agent's cursor where it last clicked or typed.
+function BrowserScreen({ agentId, onOpen }: { agentId: string; onOpen?: () => void }): ReactNode {
+  const view = useStore((s) => browserOf(s, agentId))
+  const agent = useStore((s) => agentById(s, agentId))
+  const live = useLive(agentId)
+  if (!view?.frame)
+    return (
+      <div className="screen screen--empty">
+        <Icon name="globe" size={22} />
+        <span>{view?.doing ? `${view.doing.label}…` : 'Nenhuma página aberta ainda'}</span>
+      </div>
+    )
+  const c = view.cursor
+  return (
+    <div className={`screen ${onOpen ? 'screen--button' : ''}`} onClick={onOpen} role={onOpen ? 'button' : undefined}>
+      <img className="screen__frame" src={view.frame} alt={view.title} draggable={false} />
+      {c && !view.shown && agent && (
+        <span className={`screen__cursor c-${agent.color} ${live ? '' : 'is-idle'}`} style={{ left: `${c.x * 100}%`, top: `${c.y * 100}%` }}>
+          <i key={c.at} className="screen__ripple" />
+          <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden>
+            <path d="m4 2 16 8-7 2-3 7L4 2Z" />
+          </svg>
+          <span className="screen__name">{agent.name}</span>
+        </span>
+      )}
+      {view.doing && !view.shown && (
+        <span className="screen__status">
+          <span className="spinner" />
+          <span>
+            {view.doing.label} {view.doing.detail && <strong>{view.doing.detail}</strong>}
+          </span>
+        </span>
+      )}
+      {view.shown && (
+        <span className="screen__status screen__status--you">
+          <Icon name="hand" size={13} />
+          Você está no controle. Feche a janela do Chrome ou clique em Devolver.
+        </span>
+      )}
+    </div>
+  )
+}
+
+function BrowserLog({ agentId, max }: { agentId: string; max?: number }): ReactNode {
+  const view = useStore((s) => browserOf(s, agentId))
+  if (!view) return null
+  const log = [...view.log].reverse().slice(0, max)
+  return (
+    <ol className="browser-log">
+      {view.doing && (
+        <li className="is-now">
+          <span className="browser-log__icon">
+            <span className="spinner" />
+          </span>
+          <span className="browser-log__text">
+            {view.doing.label}
+            {view.doing.detail && <span className="muted"> {view.doing.detail}</span>}
+          </span>
+          <time>agora</time>
+        </li>
+      )}
+      {log.map((l, i) => (
+        <li key={`${l.at}-${i}`}>
+          <span className="browser-log__icon">
+            <Icon name={logIcon(l.label)} size={12} />
+          </span>
+          <span className="browser-log__text">
+            {l.label}
+            {l.detail && <span className="muted"> {l.detail}</span>}
+          </span>
+          <time>{clock(l.at)}</time>
+        </li>
+      ))}
+      {!view.doing && log.length === 0 && <li className="muted">Nada ainda.</li>}
+    </ol>
+  )
+}
+
+function TakeOver({ agentId }: { agentId: string }): ReactNode {
+  const view = useStore((s) => browserOf(s, agentId))
+  if (!view?.url) return null
+  return (
+    <button
+      className={`btn btn--sm ${view.shown ? 'btn--primary' : 'btn--ghost'}`}
+      title={view.shown ? 'Fecha a janela e devolve o navegador' : 'Abre o navegador numa janela pra você usar (login, código, captcha)'}
+      onClick={(e) => {
+        e.stopPropagation()
+        browserAction(agentId, view.shown ? 'hide' : 'show')
+      }}
+    >
+      <Icon name="hand" size={13} />
+      {view.shown ? 'Devolver' : 'Assumir'}
+    </button>
+  )
+}
+
+// In the chat, on the agent's latest message that used it: the browser live,
+// with what it did. Older messages get a small card.
+export function BrowserCard({ agentId, big }: { agentId: string; big?: boolean }): ReactNode {
   const view = useStore((s) => browserOf(s, agentId))
   const name = useStore((s) => agentById(s, agentId)?.name ?? 'agente')
   const open = useStore((s) => s.panel?.kind === 'browser' && s.panel.agentId === agentId)
+  const show = (): void => openPanel({ kind: 'browser', agentId })
+  const status = view?.shown ? 'você está no controle' : view?.doing ? `${view.doing.label.toLowerCase()} ${view.doing.detail}` : view?.log.at(-1)?.label.toLowerCase() ?? 'parado'
+
+  if (big)
+    return (
+      <div className="browser-live">
+        <header className="browser-live__head">
+          <Icon name="globe" size={14} />
+          <span className="browser-live__title">
+            <strong>Navegador de {name}</strong>
+            <span className="muted"> · {status}</span>
+          </span>
+          <LiveBadge agentId={agentId} />
+          <span className="grow" />
+          <TakeOver agentId={agentId} />
+          <button className="icon-btn" title="Abrir ao lado" onClick={show}>
+            <Icon name="expand" size={14} />
+          </button>
+        </header>
+        <div className="browser-live__body">
+          <div className="browser-live__screen">
+            <UrlBar url={view?.url ?? ''} />
+            <BrowserScreen agentId={agentId} onOpen={show} />
+          </div>
+          <BrowserLog agentId={agentId} max={7} />
+        </div>
+      </div>
+    )
+
   return (
-    <button className={`artifact-card browser-card ${open ? 'is-open' : ''}`} onClick={() => openPanel({ kind: 'browser', agentId })}>
+    <button className={`artifact-card browser-card ${open ? 'is-open' : ''}`} onClick={show}>
       {view?.frame ? (
         <img className="browser-card__thumb" src={view.frame} alt="" />
       ) : (
@@ -101,24 +282,23 @@ export function BrowserCard({ agentId }: { agentId: string }): ReactNode {
 
 function BrowserPanel({ agentId }: { agentId: string }): ReactNode {
   const view = useStore((s) => browserOf(s, agentId))
-  if (!view?.url && !view?.frame) return <p className="empty">O navegador ainda não abriu nenhuma página.</p>
   return (
     <div className="browser-view">
-      {view.shown && <p className="browser-view__note">A janela do navegador está aberta pra você. Faça o que precisar (login, código, captcha) e feche a janela pra devolver.</p>}
-      {view.frame && <img className="browser-view__frame" src={view.frame} alt={view.title} />}
-      {view.log.length > 0 && (
-        <ol className="browser-log">
-          {[...view.log].reverse().map((l, i) => (
-            <li key={`${l.at}-${i}`}>
-              <span>
-                {l.label}
-                {l.detail && <span className="muted"> · {l.detail}</span>}
-              </span>
-              <time className="muted">{new Date(l.at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</time>
-            </li>
-          ))}
-        </ol>
-      )}
+      <div className="browser-window">
+        <div className="browser-window__bar">
+          <span className="browser-window__dots">
+            <i />
+            <i />
+            <i />
+          </span>
+          <UrlBar url={view?.url ?? ''} />
+        </div>
+        <BrowserScreen agentId={agentId} />
+      </div>
+      <section className="browser-activity">
+        <h4>O que fez</h4>
+        <BrowserLog agentId={agentId} />
+      </section>
     </div>
   )
 }
@@ -136,26 +316,14 @@ export function SidePanel(): ReactNode {
 
   const title = artifact?.title ?? service?.name ?? (panel.kind === 'browser' ? `Navegador de ${browserName ?? 'agente'}` : '')
   return (
-    <aside className="side-panel">
+    <aside className={`side-panel side-panel--${panel.kind}`}>
       <header className="side-panel__head">
         <Icon name={panel.kind === 'service' || panel.kind === 'browser' ? 'globe' : 'edit'} size={14} />
         <strong className="side-panel__title">{title}</strong>
         {service?.url && <code className="side-panel__url">{service.url}</code>}
-        {browser?.url && (
-          <code className="side-panel__url" title={browser.url}>
-            {browser.url.replace(/^https?:\/\//, '').slice(0, 60)}
-          </code>
-        )}
+        {panel.kind === 'browser' && <LiveBadge agentId={panel.agentId} />}
         <span className="grow" />
-        {panel.kind === 'browser' && browser?.url && (
-          <button
-            className={`btn btn--sm ${browser.shown ? 'btn--ghost' : 'btn--primary'}`}
-            title={browser.shown ? 'Fecha a janela e devolve o navegador' : 'Abre a janela do navegador pra você usar (login, captcha)'}
-            onClick={() => browserAction(panel.agentId, browser.shown ? 'hide' : 'show')}
-          >
-            {browser.shown ? 'Devolver' : 'Assumir'}
-          </button>
-        )}
+        {panel.kind === 'browser' && <TakeOver agentId={panel.agentId} />}
         {service?.url && (
           <>
             <button className="icon-btn" title="Recarregar" onClick={() => setReload((n) => n + 1)}>

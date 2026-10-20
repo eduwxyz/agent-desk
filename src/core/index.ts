@@ -154,7 +154,15 @@ const electronHost: BrowserHost = (agentId, op, args) =>
     setTimeout(() => pages.get(id) && (pages.delete(id), reject(new Error('o navegador não respondeu em 60 s'))), 60_000).unref()
   })
 // Google Chrome when the Mac has it (Google refuses logins in embedded browsers); Electron's Chromium otherwise.
-const chrome = !fake && hasChrome() ? new ChromeBrowsers(join(dataDir, 'navegador'), (agentId, shown) => browser.setShown(agentId, shown)) : undefined
+const chrome =
+  !fake && hasChrome()
+    ? new ChromeBrowsers(
+        join(dataDir, 'navegador'),
+        (agentId, shown) => browser.setShown(agentId, shown),
+        undefined,
+        (agentId, jpeg) => browser.frame(agentId, jpeg)
+      )
+    : undefined
 const host: BrowserHost = chrome ? (agentId, op, args) => chrome.run(agentId, op, args) : electronHost
 
 const secrets = new Secrets(db, fake ? plainCipher : mainCipher(process.parentPort))

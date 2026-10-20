@@ -178,6 +178,7 @@ export interface BrowserReply {
   elements?: BrowserElement[]
   text?: string
   shown?: boolean // the window is open for me
+  point?: { x: number; y: number } // where it just clicked or typed, as a fraction of the viewport
 }
 
 // An agent's browser as the side panel shows it (spec §24): the last frame and what it did.
@@ -188,6 +189,8 @@ export interface BrowserView {
   frame?: string // data:image/jpeg URL of the page as it is now
   shown: boolean // the window is open for me ("Assumir"): I'm driving
   log: { label: string; detail: string; at: number }[] // the latest actions, oldest first
+  doing?: { label: string; detail: string } // the action under way ("Clicando em", "Buscar")
+  cursor?: { x: number; y: number; at: number } // where the agent last clicked or typed, as a fraction of the screen
   at: number
 }
 

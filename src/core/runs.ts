@@ -658,7 +658,7 @@ export class Runner {
           msg.run = {
             ...msg.run!,
             artifactIds: artifactIds.length ? [...artifactIds] : undefined,
-            steps: [...close(out.result.isError ? 'error' : 'done'), thinking()]
+            steps: [...close(out.result.isError ? 'error' : 'done', out.detail ? { detail: out.detail } : {}), thinking()]
           }
           stepStarted = Date.now()
           save()

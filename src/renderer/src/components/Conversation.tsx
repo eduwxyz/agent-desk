@@ -149,6 +149,13 @@ function MessageRow({ message, grouped }: { message: Message; grouped: boolean }
   const me = useStore((s) => s.me)
   const agent = useStore((s) => (message.author.kind === 'agent' ? agentById(s, message.author.id) : undefined))
   const approval = useStore((s) => (message.run?.approvalId ? s.approvals.find((a) => a.id === message.run!.approvalId) : undefined))
+  // The browser shows live on the agent's latest message that used it, unless it's open on the side.
+  const liveBrowser = useStore(
+    (s) =>
+      !!message.run?.browser &&
+      !(s.panel?.kind === 'browser' && s.panel.agentId === agent?.id) &&
+      s.messages.findLast((m) => m.conversationId === message.conversationId && m.run?.browser && m.author.kind === 'agent' && m.author.id === agent?.id)?.id === message.id
+  )
 
   if (message.author.kind === 'system') {
     return (
@@ -211,7 +218,7 @@ function MessageRow({ message, grouped }: { message: Message; grouped: boolean }
           </div>
         )}
         {agent && message.run?.services?.map((name) => <ServiceCard key={name} agentId={agent.id} name={name} />)}
-        {agent && message.run?.browser && <BrowserCard agentId={agent.id} />}
+        {agent && message.run?.browser && <BrowserCard agentId={agent.id} big={liveBrowser} />}
         {message.run?.status === 'stopped' && <div className="note">Interrompido por você.</div>}
         {message.run?.status === 'interrupted' && <div className="note">Interrompido: o app fechou no meio da resposta.</div>}
         {message.run?.error && <div className="note note--error">{message.run.error}</div>}

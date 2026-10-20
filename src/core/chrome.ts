@@ -3,7 +3,8 @@
 // its sessions to the Chrome that made them, so the agent's browser is Chrome
 // itself, with a profile of its own: headless while the agent drives it,
 // a normal window when I take over ("Assumir"). Driven over the DevTools
-// protocol; the page scripts are the same as in the Electron fallback.
+// protocol; the page scripts are the same as in the Electron fallback. The
+// screen streams to the app while it changes, so the panel is a live view.
 import { spawn, type ChildProcess } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync, readlinkSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
@@ -14,6 +15,8 @@ export const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chr
 
 const W = 1280
 const H = 800
+const FRAME_MS = 150 // at most ~6 frames a second while someone watches
+const IDLE_MS = 2000 // and one every 2 s otherwise: an animated page left open costs little
 const wait = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
 const alive = (pid: number): boolean => {
   try {
@@ -46,6 +49,8 @@ const KEYS: Record<string, { key: string; code: string; vk: number; text?: strin
 }
 
 type Pending = { resolve: (v: Record<string, unknown>) => void; reject: (e: Error) => void }
+// A new frame of the screen; says whether the app wants frames at full speed now.
+export type OnFrame = (agentId: string, jpeg: string) => boolean
 
 // One Chrome process and its DevTools connection, following one tab.
 class Tab {
@@ -60,7 +65,8 @@ class Tab {
 
   constructor(
     readonly proc: ChildProcess,
-    readonly headed: boolean
+    readonly headed: boolean,
+    private onFrame?: (jpeg: string) => boolean
   ) {}
 
   async connect(port: string): Promise<void> {
@@ -108,7 +114,12 @@ class Tab {
     if (m['method'] === 'Target.targetCreated' && info?.type === 'page' && info.openerId === this.target) void this.follow(info.targetId).catch(() => {}) // a link that opens a new tab: go with it
     else if (m['method'] === 'Target.targetInfoChanged' && info?.targetId === this.target) this.url = info.url
     else if (m['method'] === 'Target.targetDestroyed') void this.checkClosed(String(params['targetId']))
-    else if ((m['method'] === 'Runtime.executionContextsCleared' || m['method'] === 'Page.frameNavigated') && m['sessionId'] === this.session) this.world = undefined
+    else if (m['method'] === 'Page.screencastFrame' && m['sessionId'] === this.session) {
+      // Chrome sends the next frame only after this one is acknowledged: the ack sets the pace.
+      const session = m['sessionId']
+      const fast = this.onFrame?.(String(params['data'])) ?? false
+      setTimeout(() => void this.send('Page.screencastFrameAck', { sessionId: params['sessionId'] }, String(session)).catch(() => {}), fast ? FRAME_MS : IDLE_MS).unref()
+    } else if ((m['method'] === 'Runtime.executionContextsCleared' || m['method'] === 'Page.frameNavigated') && m['sessionId'] === this.session) this.world = undefined
   }
 
   private async checkClosed(targetId: string): Promise<void> {
@@ -119,6 +130,7 @@ class Tab {
   }
 
   private async follow(targetId: string): Promise<void> {
+    if (this.session && this.onFrame) void this.cmd('Page.stopScreencast').catch(() => {})
     const { sessionId } = (await this.send('Target.attachToTarget', { targetId, flatten: true })) as { sessionId: string }
     this.session = sessionId
     this.target = targetId
@@ -144,6 +156,7 @@ class Tab {
     }
     const { targetInfo } = (await this.send('Target.getTargetInfo', { targetId })) as { targetInfo: { url: string } }
     this.url = targetInfo.url
+    if (this.onFrame) await this.cmd('Page.startScreencast', { format: 'jpeg', quality: 60, maxWidth: W, maxHeight: H, everyNthFrame: 1 }).catch(() => {})
   }
 
   // Runs one of the page scripts in our isolated world: the page can't see or change it.
@@ -184,7 +197,8 @@ export class ChromeBrowsers {
   constructor(
     private dir: string, // profiles live in <dir>/<agentId>
     private onShown: (agentId: string, shown: boolean) => void,
-    private bin = CHROME
+    private bin = CHROME,
+    private onFrame?: OnFrame
   ) {
     process.on('exit', () => this.quit())
   }
@@ -235,7 +249,8 @@ export class ChromeBrowsers {
       proc.kill()
       throw new Error('o Chrome não abriu em 15 s')
     }
-    const tab = new Tab(proc, headed)
+    const onFrame = this.onFrame
+    const tab = new Tab(proc, headed, onFrame && ((jpeg) => onFrame(agentId, jpeg)))
     await tab.connect(port)
     proc.once('exit', () => {
       if (this.tabs.get(agentId) !== tab) return
@@ -313,9 +328,12 @@ export class ChromeBrowsers {
     }
 
     const tab = await this.tab(agentId)
-    const here = async (frame: boolean): Promise<BrowserReply> => {
-      const info = await tab.run<{ url: string; title: string }>('({ url: location.href, title: document.title })').catch(() => ({ url: tab.url, title: '' }))
-      return { ...info, shown: tab.headed, ...(frame ? { frame: await this.frame(tab) } : {}) }
+    const here = async (frame: boolean, at?: { x: number; y: number }): Promise<BrowserReply> => {
+      const { w, h, ...info } = await tab
+        .run<{ url: string; title: string; w: number; h: number }>('({ url: location.href, title: document.title, w: innerWidth, h: innerHeight })')
+        .catch(() => ({ url: tab.url, title: '', w: 0, h: 0 }))
+      const point = at && w && h ? { x: at.x / w, y: at.y / h } : undefined
+      return { ...info, shown: tab.headed, ...(point ? { point } : {}), ...(frame ? { frame: await this.frame(tab) } : {}) }
     }
 
     switch (op) {
@@ -335,7 +353,7 @@ export class ChromeBrowsers {
         await wait(80)
         await this.click(tab, at.x, at.y)
         await this.settle(tab)
-        return here(true)
+        return here(true, at)
       }
       case 'type': {
         const ref = Number(args['ref'])
@@ -355,7 +373,7 @@ export class ChromeBrowsers {
         }
         if (args['enter'] === true) await this.key(tab, 'enter')
         await this.settle(tab)
-        return here(true)
+        return here(true, at)
       }
       case 'key': {
         const key = String(args['key'] ?? '').toLowerCase().replace(/[^a-z]/g, '')

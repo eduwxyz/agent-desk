@@ -107,6 +107,10 @@ export class Browsers {
     const wc = win.webContents
     const iso = <T>(code: string): Promise<T> => wc.executeJavaScriptInIsolatedWorld(WORLD, [{ code }]) as Promise<T>
     const here = (): Reply => ({ url: wc.getURL(), title: wc.getTitle(), shown: win.isVisible() })
+    const point = (at: { x: number; y: number }): Reply['point'] => {
+      const [w, h] = win.getContentSize() as [number, number]
+      return { x: at.x / w, y: at.y / h }
+    }
 
     switch (op) {
       case 'show':
@@ -139,7 +143,7 @@ export class Browsers {
         await wait(80) // after scrolling it into view
         this.click(wc, at.x, at.y)
         await this.settle(wc)
-        return { ...here(), frame: await this.frame(win) }
+        return { ...here(), point: point(at), frame: await this.frame(win) }
       }
       case 'type': {
         const ref = Number(args['ref'])
@@ -159,7 +163,7 @@ export class Browsers {
         }
         if (args['enter'] === true) this.key(wc, 'enter')
         await this.settle(wc)
-        return { ...here(), frame: await this.frame(win) }
+        return { ...here(), point: point(at), frame: await this.frame(win) }
       }
       case 'key': {
         const key = String(args['key'] ?? '').toLowerCase().replace(/[^a-z]/g, '')

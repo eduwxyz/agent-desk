@@ -57,6 +57,7 @@ describe('finding what the agent names', () => {
     expect(bareTarget('o botão "Buscar"')).toBe('buscar')
     expect(bareTarget('Clique no campo de Destino')).toBe('destino')
     expect(findByText('#3', ELEMENTS)?.label).toBe('Publicar')
+    expect(findByText('#3 botão Publicar', ELEMENTS)?.label).toBe('Publicar') // number and name together
     expect(findByText('o botão Buscar', ELEMENTS)?.ref).toBe(2) // exact wins over "Buscar ajuda"
     expect(findByText('destino', ELEMENTS)?.ref).toBe(1)
     expect(findByText('ajud', ELEMENTS)).toBeUndefined() // only off screen
@@ -111,6 +112,33 @@ describe("an agent's browser", () => {
     expect(view.log.at(-1)).toMatchObject({ label: 'Abriu', detail: 'https://studio.youtube.com' })
     expect(events.some((e) => e.type === 'browser')).toBe(true)
     expect((await browser.call(lia(), 'navegador_abrir', { url: 'file:///etc/passwd' }, ctx)).result.isError).toBe(true)
+  })
+
+  it('the panel shows what it is doing, where it clicked, and streams the screen only while it works', async () => {
+    const host = fake.host
+    let during: unknown
+    browser = new Browser({
+      host: async (id, op, args) => {
+        if (op === 'click') during = browser.view(id)?.doing
+        const r = await host(id, op, args)
+        return op === 'click' ? { ...r, point: { x: 0.25, y: 0.5 } } : r
+      },
+      db,
+      dataDir,
+      emit: (e) => events.push(e),
+      me: () => 'Edu'
+    })
+    expect(browser.frame('lia-0001', 'x')).toBe(false) // nothing open yet
+    await browser.call(lia(), 'navegador_abrir', { url: 'https://airbnb.com' }, ctx)
+    const out = await browser.call(lia(), 'navegador_clicar', { alvo: '#2' }, ctx)
+    expect(during).toEqual({ label: 'Clicando em', detail: 'Buscar' }) // by name, even when it said a number
+    expect(out.detail).toBe('Buscar')
+    const view = browser.view('lia-0001')!
+    expect(view.doing).toBeUndefined()
+    expect(view.cursor).toMatchObject({ x: 0.25, y: 0.5 })
+    expect(browser.frame('lia-0001', Buffer.from('novo').toString('base64'))).toBe(true) // just worked: live
+    await new Promise((r) => setTimeout(r, 150))
+    expect(browser.view('lia-0001')!.frame).toBe(`data:image/jpeg;base64,${Buffer.from('novo').toString('base64')}`)
   })
 
   it('clicks and types by text, without any model', async () => {

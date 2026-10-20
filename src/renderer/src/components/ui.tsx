@@ -65,7 +65,19 @@ const PATHS: Record<string, ReactNode> = {
     </>
   ),
   moon: <path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5Z" />,
-  laptop: <path d="M5 5h14a1 1 0 0 1 1 1v10H4V6a1 1 0 0 1 1-1ZM2 19h20" />
+  laptop: <path d="M5 5h14a1 1 0 0 1 1 1v10H4V6a1 1 0 0 1 1-1ZM2 19h20" />,
+  pointer: <path d="m5 3 14 7-6 2-2 6L5 3Z" />,
+  eye: (
+    <>
+      <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z" />
+      <circle cx="12" cy="12" r="3" />
+    </>
+  ),
+  keyboard: <path d="M3 7a1 1 0 0 1 1-1h16a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V7ZM7 10h.01M11 10h.01M15 10h.01M8 14h8" />,
+  down: <path d="M12 5v14M6 13l6 6 6-6" />,
+  back: <path d="M19 12H5M11 6l-6 6 6 6" />,
+  hand: <path d="M8 13V5.5a1.5 1.5 0 0 1 3 0V11M11 10.5V4a1.5 1.5 0 0 1 3 0v6.5M14 10.5V6a1.5 1.5 0 0 1 3 0v8a7 7 0 0 1-7 7h-.5a6 6 0 0 1-5-2.7L3 15.5a1.6 1.6 0 0 1 2.6-1.8L8 16" />,
+  expand: <path d="M14 4h6v6M10 20H4v-6M20 4l-7 7M4 20l7-7" />
 }
 
 export type IconName = keyof typeof PATHS

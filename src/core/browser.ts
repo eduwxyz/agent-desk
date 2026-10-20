@@ -101,7 +101,7 @@ export const risky = (...texts: string[]): boolean => texts.some((t) => RISKY.te
 
 // The element named by number, by its exact text, or by the only text that contains it.
 export function findByText(target: string, elements: BrowserElement[]): BrowserElement | undefined {
-  const num = /^#?\s*(\d+)$/.exec(target.trim())
+  const num = /^#?\s*(\d+)$/.exec(target.trim()) ?? /^#\s*(\d+)\b/.exec(target.trim()) // "#9" or "#9 botão Buscar"
   if (num) return elements.find((e) => e.ref === Number(num[1]))
   const t = bareTarget(target)
   if (!t) return undefined
@@ -152,6 +152,19 @@ const LABELS: Record<string, string> = {
   navegador_esperar: 'Esperou'
 }
 
+// What it's doing right now, for the live view.
+const DOING: Record<string, string> = {
+  navegador_abrir: 'Abrindo',
+  [CLICAR]: 'Clicando em',
+  navegador_digitar: 'Escrevendo em',
+  navegador_tecla: 'Apertando',
+  navegador_rolar: 'Rolando',
+  navegador_voltar: 'Voltando',
+  navegador_ler: 'Lendo a página',
+  navegador_ver: 'Olhando a tela',
+  navegador_esperar: 'Esperando'
+}
+
 // One line for the step in the chat. What's typed never shows: it may be private.
 export function browserStep(name: string, args: Record<string, unknown>): { label: string; detail: string } {
   const s = (k: string): string => String(args[k] ?? '')
@@ -166,6 +179,7 @@ export interface BrowserOutcome {
   result: CallToolResult
   artifact?: Artifact
   approval?: { args: Record<string, unknown>; why: string; detail: string } // a click that waits for me
+  detail?: string // what it clicked or typed in, by name, for the step in the chat
 }
 
 export interface BrowserDeps {
@@ -181,9 +195,12 @@ type Ctx = { conversationId: string; messageId: string }
 type Spot = { ref: number; el: BrowserElement; via: string } | { x: number; y: number; via: string }
 
 const LOG = 14
+const LIVE_MS = 20_000 // frames stream at full speed while it works, and a little after
 
 export class Browser {
   private views = new Map<string, BrowserView>()
+  private liveUntil = new Map<string, number>()
+  private frames = new Map<string, { next?: string; timer?: ReturnType<typeof setTimeout> }>()
 
   constructor(private deps: BrowserDeps) {}
 
@@ -204,12 +221,44 @@ export class Browser {
   }
 
   private seen(agentId: string, r: BrowserReply, log?: { label: string; detail: string }): void {
-    this.update(agentId, { url: r.url, title: r.title, ...(r.frame ? { frame: `data:image/jpeg;base64,${r.frame}` } : {}), ...(r.shown !== undefined ? { shown: r.shown } : {}) }, log)
+    this.update(
+      agentId,
+      {
+        url: r.url,
+        title: r.title,
+        ...(r.frame ? { frame: `data:image/jpeg;base64,${r.frame}` } : {}),
+        ...(r.shown !== undefined ? { shown: r.shown } : {}),
+        ...(r.point ? { cursor: { ...r.point, at: Date.now() } } : {})
+      },
+      log
+    )
+  }
+
+  private live(agentId: string, ms = LIVE_MS): void {
+    this.liveUntil.set(agentId, Date.now() + ms)
+  }
+
+  // A frame of the screen, streamed by Chrome while the page changes. Only while
+  // it works or I drive: says Chrome may send the next one right away.
+  frame(agentId: string, jpeg: string): boolean {
+    const view = this.views.get(agentId)
+    if (!view?.url || !(view.shown || view.doing || (this.liveUntil.get(agentId) ?? 0) > Date.now())) return false
+    const f = this.frames.get(agentId) ?? {}
+    this.frames.set(agentId, f)
+    f.next = jpeg
+    if (!f.timer)
+      f.timer = setTimeout(() => {
+        f.timer = undefined
+        if (f.next && this.views.get(agentId)?.url) this.update(agentId, { frame: `data:image/jpeg;base64,${f.next}` })
+        f.next = undefined
+      }, 100)
+    return true
   }
 
   // From the main process: I opened the window ("Assumir") or closed it.
   setShown(agentId: string, shown: boolean): void {
     if (this.views.get(agentId)?.shown === shown) return
+    this.live(agentId)
     this.update(agentId, { shown }, { label: shown ? `${this.deps.me()} assumiu` : `${this.deps.me()} devolveu`, detail: '' })
     if (!shown) void this.deps.host(agentId, 'frame').then((r) => this.seen(agentId, r), () => {})
   }
@@ -274,6 +323,7 @@ export class Browser {
     const step = browserStep(name, args)
     const driving = this.views.get(id)?.shown && !['navegador_ler', 'navegador_ver', 'navegador_esperar'].includes(name)
     if (driving) return { result: textResult(`${this.deps.me()} está usando o seu navegador agora (Assumir). Espere com navegador_esperar ou encerre e continue quando ele fechar a janela.`, true) }
+    this.update(id, { doing: { label: DOING[name] ?? step.label, detail: step.detail } })
     try {
       switch (name) {
         case 'navegador_abrir': {
@@ -289,6 +339,7 @@ export class Browser {
           const spot = await this.locate(target, page)
           if ('error' in spot) return { result: textResult(spot.error, true) }
           const label = 'el' in spot ? spot.el.label : target
+          this.update(id, { doing: { label: 'Clicando em', detail: label || target } })
           if (risky(label || target)) {
             const shot = page.frame ? { frame: page.frame } : await this.deps.host(id, 'frame')
             const artifact = shot.frame ? this.keep(id, ctx, Buffer.from(shot.frame, 'base64'), `Antes de clicar em "${label}"`, page.url) : undefined
@@ -301,7 +352,7 @@ export class Browser {
             }
           }
           const r = await this.deps.host(id, 'click', 'el' in spot ? { ref: spot.ref } : { x: spot.x, y: spot.y })
-          return { result: await this.after(id, r, { ...step, detail: label || target }) }
+          return { result: await this.after(id, r, { ...step, detail: label || target }), detail: label || target }
         }
         case 'navegador_digitar': {
           const target = String(args['alvo'] ?? '').trim()
@@ -311,8 +362,9 @@ export class Browser {
           const spot = await this.locate(target, { ...page, elements: fields.length ? fields : page.elements })
           if ('error' in spot) return { result: textResult(spot.error, true) }
           if (!('el' in spot)) return { result: textResult('Achei o lugar só pela imagem; clique nele com navegador_clicar e use o número do campo.', true) }
+          this.update(id, { doing: { label: 'Escrevendo em', detail: spot.el.label || target } })
           const r = await this.deps.host(id, 'type', { ref: spot.ref, text: String(args['texto'] ?? ''), enter: args['enter'] === true })
-          return { result: await this.after(id, r, { ...step, detail: spot.el.label || target }) }
+          return { result: await this.after(id, r, { ...step, detail: spot.el.label || target }), detail: spot.el.label || target }
         }
         case 'navegador_tecla': {
           const key = String(args['tecla'] ?? '').toLowerCase().replace(/[^a-z]/g, '')
@@ -352,6 +404,9 @@ export class Browser {
       }
     } catch (e) {
       return { result: textResult(`O navegador falhou: ${e instanceof Error ? e.message : String(e)}`, true) }
+    } finally {
+      this.live(id)
+      this.update(id, { doing: undefined })
     }
   }
 
@@ -359,6 +414,7 @@ export class Browser {
   async approved(agent: Agent, args: Record<string, unknown>): Promise<{ ok: boolean; text: string }> {
     const url = String(args['url'] ?? '')
     const target = String(args['alvo'] ?? '')
+    this.update(agent.id, { doing: { label: 'Clicando em', detail: target } })
     try {
       const snap = await this.deps.host(agent.id, 'snapshot')
       if (!sameUrl(snap.url, url)) return { ok: false, text: `A página mudou desde o pedido (agora está em ${snap.url}). Nada foi clicado.` }
@@ -373,6 +429,9 @@ export class Browser {
       return { ok: true, text: await this.after(agent.id, r, { label: 'Clicou (aprovado)', detail: target }).then((x) => (x.content[0] as { text: string }).text) }
     } catch (e) {
       return { ok: false, text: `O navegador falhou: ${e instanceof Error ? e.message : String(e)}` }
+    } finally {
+      this.live(agent.id)
+      this.update(agent.id, { doing: undefined })
     }
   }
 
