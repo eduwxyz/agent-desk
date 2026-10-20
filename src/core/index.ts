@@ -26,6 +26,7 @@ import { backup, backupIfDue, exportTeam, importTeam } from './team'
 import { Telegram } from './telegram'
 import { mainCipher, plainCipher, Secrets } from './secrets'
 import { Browser, type BrowserHost } from './browser'
+import { ChromeBrowsers, hasChrome } from './chrome'
 import { checkFolder, Computers, folderName, type Shooter } from './computer'
 import { Memories } from './memory'
 import { cleanFiles, defaultFiles, projectFolders } from './projects'
@@ -145,13 +146,16 @@ const shoot: Shooter = (opts) =>
     process.parentPort.postMessage({ type: 'screenshot', id, ...opts })
   })
 
-const host: BrowserHost = (agentId, op, args) =>
+const electronHost: BrowserHost = (agentId, op, args) =>
   new Promise((resolve, reject) => {
     const id = randomUUID()
     pages.set(id, { resolve, reject })
     process.parentPort.postMessage({ type: 'browser', id, agentId, op, args })
     setTimeout(() => pages.get(id) && (pages.delete(id), reject(new Error('o navegador não respondeu em 60 s'))), 60_000).unref()
   })
+// Google Chrome when the Mac has it (Google refuses logins in embedded browsers); Electron's Chromium otherwise.
+const chrome = !fake && hasChrome() ? new ChromeBrowsers(join(dataDir, 'navegador'), (agentId, shown) => browser.setShown(agentId, shown)) : undefined
+const host: BrowserHost = chrome ? (agentId, op, args) => chrome.run(agentId, op, args) : electronHost
 
 const secrets = new Secrets(db, fake ? plainCipher : mainCipher(process.parentPort))
 const browser = new Browser({
