@@ -107,6 +107,7 @@ const TEXT = `(() => {
 
 export class Browsers {
   private wins = new Map<string, BrowserWindow>()
+  private reopening = new Map<string, Promise<void>>()
   private quitting = false
 
   constructor(private onShown: (agentId: string, shown: boolean) => void) {}
@@ -148,14 +149,34 @@ export class Browsers {
       if (this.quitting) return
       e.preventDefault()
       win.hide()
+      this.fresh(agentId, win)
     })
-    win.on('hide', () => this.onShown(agentId, false))
+    win.on('hide', () => {
+      this.onShown(agentId, false)
+      setImmediate(() => this.fresh(agentId, win))
+    })
     win.on('show', () => this.onShown(agentId, true))
     this.wins.set(agentId, win)
     return win
   }
 
+  // A window that was shown and hidden again stops painting (captures fail or
+  // hang), so handing it back swaps it for a new hidden one on the same page.
+  // The logins live in the session, so they stay.
+  private fresh(agentId: string, old: BrowserWindow): void {
+    if (this.quitting || this.wins.get(agentId) !== old) return
+    const url = old.webContents.getURL()
+    this.wins.delete(agentId) // from now on every action goes to the new window
+    setImmediate(() => old.destroy())
+    this.onShown(agentId, false)
+    const wc = this.win(agentId).webContents
+    const p = /^https?:/.test(url) ? wc.loadURL(url).catch(() => {}).then(() => this.settle(wc)) : Promise.resolve()
+    this.reopening.set(agentId, p)
+    void p.finally(() => this.reopening.get(agentId) === p && this.reopening.delete(agentId))
+  }
+
   async run(agentId: string, op: BrowserOp, args: Record<string, unknown> = {}): Promise<Reply> {
+    await this.reopening.get(agentId)
     if (op === 'close' || op === 'clear') {
       this.wins.get(agentId)?.destroy()
       this.wins.delete(agentId)
@@ -175,7 +196,8 @@ export class Browsers {
         return here()
       case 'hide':
         win.hide()
-        return here()
+        this.fresh(agentId, win)
+        return { url: wc.getURL(), title: wc.getTitle(), shown: false }
       case 'open': {
         const url = String(args['url'] ?? '')
         if (!/^https?:\/\//.test(url)) throw new Error('Só endereços http e https.')
@@ -264,8 +286,10 @@ export class Browsers {
     await wait(400)
   }
 
-  private async frame(win: BrowserWindow): Promise<string> {
-    let img = await win.webContents.capturePage(undefined, { stayHidden: true })
+  // Never waits more than 5 s: a page that can't be painted gives no frame, not a stuck agent.
+  private async frame(win: BrowserWindow): Promise<string | undefined> {
+    let img = await Promise.race([win.webContents.capturePage(undefined, { stayHidden: true }).catch(() => null), wait(5000).then(() => null)])
+    if (!img || img.isEmpty()) return undefined
     if (img.getSize().width > W) img = img.resize({ width: W, quality: 'good' })
     return img.toJPEG(70).toString('base64')
   }

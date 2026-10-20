@@ -532,6 +532,10 @@ export function ApprovalCard({ approval, compact }: { approval: Approval; compac
           <>
             {agent?.name ?? 'Agente'} quer abrir uma <strong>pull request</strong> em {String(approval.args['repo'])}
           </>
+        ) : approval.connectorId === 'navegador' ? (
+          <>
+            {agent?.name ?? 'Agente'} quer clicar em <strong>{String(approval.args['alvo'] || 'um ponto da tela')}</strong> em {String(approval.args['url']).replace(/^https?:\/\//, '').slice(0, 60)}
+          </>
         ) : (
           <>
             {agent?.name ?? 'Agente'} quer usar <strong>{approval.tool.replace(/_/g, ' ')}</strong> no {approval.connectorName}
@@ -598,7 +602,7 @@ export function ApprovalCard({ approval, compact }: { approval: Approval; compac
               <button className="btn btn--primary" onClick={() => decideApproval(approval.id, 'approved')}>
                 Aprovar
               </button>
-              {approval.tool !== ACCESS_REQUEST && approval.tool !== 'abrir_pr' && (
+              {approval.tool !== ACCESS_REQUEST && approval.tool !== 'abrir_pr' && approval.connectorId !== 'navegador' && (
                 <button className="btn" title={`Daqui pra frente ${agent?.name ?? 'o agente'} usa ${approval.tool} no ${approval.connectorName} sem pedir. Dá pra tirar na página dele.`} onClick={() => decideApproval(approval.id, 'approved', undefined, true)}>
                   Aprovar e sempre permitir
                 </button>
