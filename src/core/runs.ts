@@ -29,6 +29,7 @@ const REASON_PARAM = '_motivo'
 const OVER_CALLS_GRACE = 3 // calls refused past the budget before the turn is cut
 const BUDGET_OVERRUN = 1.3 // past the budget by this much without wrapping up, the turn is cut
 const USAGE_ALERT = 0.8
+const NARRATION_MAX = 600 // longer text before a tool call is an answer, and stays in the reply
 
 export const ASK_USER: ToolDef = {
   name: 'ask_user',
@@ -367,8 +368,20 @@ export class Runner {
     msg.text = ''
     msg.run = { status: 'working', depth: opts.depth, steps: [thinking()] }
     const save = (patch: Partial<Message> = {}): void => this.update(msg, patch)
-    const closeThinking = (status: 'done' | 'error', label: string): Step[] =>
-      msg.run!.steps.map((s) => (s.status === 'running' ? { ...s, status, label, ms: Date.now() - stepStarted } : s))
+    // What it writes before using a tool is narration ("Vou abrir o Studio"): it
+    // goes with that step, and the reply keeps only what it says at the end.
+    let narration: string | undefined
+    const said = (): string | undefined => {
+      const text = msg.text.trim()
+      if (!text || text.length > NARRATION_MAX) return undefined
+      msg.text = ''
+      narration = text
+      return text
+    }
+    const closeThinking = (status: 'done' | 'error', label: string): Step[] => {
+      const note = label === 'Pensou' ? said() : undefined
+      return msg.run!.steps.map((s) => (s.status === 'running' ? { ...s, status, label, ms: Date.now() - stepStarted, ...(note ? { note } : {}) } : s))
+    }
 
     // Checked before anything is spawned: no tokens are spent past the limit.
     const used = db.usedThisMonth(agent.id)
@@ -928,7 +941,7 @@ export class Runner {
     } else if (result) {
       // Streamed text keeps every model call of the turn; the final result may hold only the last one.
       save({
-        text: msg.text.trim() ? msg.text : result.text,
+        text: msg.text.trim() ? msg.text.trim() : result.text.trim() ? result.text : (narration ?? ''), // said it all before its last tool
         run: { ...base, status: question ? 'waiting_input' : approval ? 'waiting_approval' : 'done', steps: closeThinking('done', 'Respondeu') }
       })
       if (!question && !approval) this.chain(agent, conv, msg, opts.depth)

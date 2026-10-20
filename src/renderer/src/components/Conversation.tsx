@@ -454,7 +454,7 @@ function StepRow({ step }: { step: Step }): ReactNode {
         {step.status === 'running' ? <span className="spinner" /> : <Icon name={step.status === 'done' ? 'check' : 'x'} size={12} />}
       </span>
       <span className="step__label">{step.label}</span>
-      {step.detail && <code className="step__detail">{step.detail}</code>}
+      {step.note ? <span className="step__note">{step.note}</span> : step.detail && <code className="step__detail">{step.detail}</code>}
       {step.ms !== undefined && <span className="step__ms">{duration(step.ms)}</span>}
     </li>
   )

@@ -88,6 +88,7 @@ export interface Step {
   id: string
   label: string
   detail?: string
+  note?: string // what the agent said while working, before this step's tool call
   status: StepStatus
   ms?: number
 }

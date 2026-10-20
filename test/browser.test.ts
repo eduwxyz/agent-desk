@@ -284,4 +284,42 @@ describe('the runner with a browser', () => {
     expect(db.agent('lia-0001')!.browser).toBe(true)
     await gateway.stop()
   })
+
+  it('what it says while working goes with the steps; the reply keeps only the end', async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), 'ad-nav-say-'))
+    const db = new Db(join(dataDir, 'test.db'))
+    db.saveAgent(lia())
+    db.createConversation({ id: 'c1', kind: 'channel', name: 'conteudo', members: ['lia-0001'] })
+    const browser = new Browser({ host: fakeHost().host, db, dataDir, emit: () => {}, me: () => 'Edu' })
+    const ready = { installed: true, loggedIn: true }
+    const settings: Settings = { workspaceName: 'Edu', context: '', engines: { claude: ready, codex: ready }, routerModel: 'haiku', memoryModel: 'haiku', memoryLearning: 'approve', defaultLimit: 1000, approvalTtlHours: 24, theme: 'system' }
+    const gateway = new Gateway()
+    await gateway.start()
+    const claude: Engine = {
+      id: 'claude',
+      async *run(turn) {
+        yield { type: 'text', delta: 'Vou abrir o Studio.' }
+        await callTool(turn.mcpUrl!, 'navegador_abrir', { url: 'https://studio.youtube.com' })
+        if (turn.prompt.includes('só antes')) {
+          yield { type: 'text', delta: 'O CTR foi 1,6%.' }
+          await callTool(turn.mcpUrl!, 'navegador_ler', {})
+          yield { type: 'done', text: '', usage: { inputTokens: 1000, cacheReadTokens: 0, outputTokens: 10 } }
+          return
+        }
+        yield { type: 'text', delta: 'O CTR foi 1,6%.' }
+        yield { type: 'done', text: 'O CTR foi 1,6%.', usage: { inputTokens: 1000, cacheReadTokens: 0, outputTokens: 10 } }
+      }
+    }
+    const r = new Runner({ db, engines: { claude, codex: fakeEngine('codex') }, settings: async () => settings, emit: () => {}, workDir: mkdtempSync(join(tmpdir(), 'w-')), gateway, browser })
+    const reply = async (text: string) => {
+      await r.send('c1', text)
+      await r.idle()
+      return db.messages().filter((x) => x.conversationId === 'c1').at(-1)!
+    }
+    const m = await reply('@lia qual o CTR?')
+    expect(m.text).toBe('O CTR foi 1,6%.')
+    expect(m.run!.steps.find((s) => s.note)).toMatchObject({ label: 'Pensou', note: 'Vou abrir o Studio.' })
+    expect((await reply('@lia diz o CTR só antes de ler')).text).toBe('O CTR foi 1,6%.') // said it all before its last tool
+    await gateway.stop()
+  })
 })
