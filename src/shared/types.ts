@@ -39,6 +39,7 @@ export interface Agent {
   computer: boolean // has a computer (spec §13): see computerKind for which
   computerKind?: ComputerKind // 'linux' (default): an isolated container; 'mac': this Mac, as the user (spec §23)
   web?: boolean // searches the web and reads pages with the CLI's own tools (spec §16); on unless false
+  browser?: boolean // drives a browser of its own: opens, clicks, types (spec §24); off unless true
   autoApprove?: string[] // "connectorId:tool" sensitive tools approved for good ("sempre permitir"), never high-risk ones
   folders?: LentFolder[] // Mac folders lent to that computer (spec §13, M5.1); changed only through lendFolder/folderAction
   archived: boolean
@@ -114,6 +115,7 @@ export interface Run {
   artifactIds?: string[] // files and screenshots shown in this reply
   services?: string[] // services started in this reply, by name, on the author's computer
   routineIds?: string[] // routines scheduled or changed with `agendar_rotina` in this reply
+  browser?: boolean // used its browser in this reply (the message links to the live view)
   budget?: number // 'paused': the per-reply budget it reached, in counted tokens
   work?: string // the piece of work it counts toward, e.g. the issue "OAB-65" (spec §20)
 }
@@ -136,6 +138,7 @@ export interface Settings {
   engines: Record<EngineId, EngineStatus>
   routerModel: string // a model id, or 'jev' for TypeSafe's Jev (falls back to Haiku)
   jevKey?: boolean // a TypeSafe key is saved (the key itself never leaves the core)
+  browserJev?: boolean // Jev finds what agents click in their browsers (each click sends the page to TypeSafe)
   memoryModel: string // summarizes conversations and extracts memories
   memoryLearning: 'approve' | 'auto' | 'off' // what extracted memories about me become
   defaultLimit: number
@@ -149,6 +152,43 @@ export interface Settings {
   quietHours?: { from: string; to: string } | null // "HH:MM": routines and triggers wait, and run late when it ends; null: off
   quota?: Quota // the Claude subscription's windows, from the last reply (spec §21)
   github?: { user?: string; error?: string } // computed: the GitHub account the app pushes and opens PRs with (spec §22)
+}
+
+// What the main process does in an agent's browser for the core, and what it answers (spec §24).
+export type BrowserOp = 'open' | 'snapshot' | 'click' | 'type' | 'key' | 'scroll' | 'back' | 'text' | 'frame' | 'show' | 'hide' | 'close' | 'clear'
+
+export interface BrowserElement {
+  ref: number // its number in the last snapshot of the page
+  role: string // botão, link, campo, lista, checkbox… or the ARIA role
+  label: string
+  value?: string // what a field or list holds now (passwords masked)
+  checked?: boolean
+  disabled?: boolean
+  inView: boolean
+}
+
+export interface BrowserReply {
+  url: string
+  title: string
+  frame?: string // base64 JPEG of what's on screen
+  w?: number // the viewport, in CSS pixels
+  h?: number
+  scrollY?: number
+  scrollH?: number
+  elements?: BrowserElement[]
+  text?: string
+  shown?: boolean // the window is open for me
+}
+
+// An agent's browser as the side panel shows it (spec §24): the last frame and what it did.
+export interface BrowserView {
+  agentId: string
+  url: string
+  title: string
+  frame?: string // data:image/jpeg URL of the page as it is now
+  shown: boolean // the window is open for me ("Assumir"): I'm driving
+  log: { label: string; detail: string; at: number }[] // the latest actions, oldest first
+  at: number
 }
 
 export interface Quota {

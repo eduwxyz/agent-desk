@@ -1,6 +1,8 @@
 import { app, BrowserWindow, dialog, ipcMain, MessageChannelMain, net, Notification, powerMonitor, powerSaveBlocker, protocol, safeStorage, shell, utilityProcess, type UtilityProcess } from 'electron'
 import { join, normalize, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
+import type { BrowserOp } from '../shared/types'
+import { Browsers } from './browser'
 
 const dataDir = (): string => process.env['AGENT_DESK_DATA'] ?? app.getPath('userData')
 
@@ -8,6 +10,9 @@ const dataDir = (): string => process.env['AGENT_DESK_DATA'] ?? app.getPath('use
 protocol.registerSchemesAsPrivileged([{ scheme: 'agentdesk', privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true } }])
 
 let core: UtilityProcess | null = null
+
+// Agents' browsers (spec §24); the core is told when I take one over or hand it back.
+const browsers = new Browsers((agentId, shown) => core?.postMessage({ type: 'browser-shown', agentId, shown }))
 
 // The core (database, engines, runs) lives in its own process so agent work
 // never blocks the window or the main process.
@@ -32,6 +37,7 @@ type CoreRequest =
   | { type: 'login_item'; open: boolean }
   | { type: 'busy'; busy: boolean }
   | { type: 'screenshot'; id: string; url: string; width: number; height: number; fullPage: boolean }
+  | { type: 'browser'; id: string; agentId: string; op: BrowserOp; args?: Record<string, unknown> }
 
 // While an agent is replying, the Mac doesn't go to sleep on its own (closing the lid still does).
 let awakeBlocker: number | null = null
@@ -67,6 +73,11 @@ function handleCore(child: UtilityProcess, msg: CoreRequest): void {
   } else if (msg.type === 'login_item') {
     // Only the installed app: in dev this would register the bare Electron binary.
     if (app.isPackaged) app.setLoginItemSettings({ openAtLogin: msg.open })
+  } else if (msg.type === 'browser') {
+    browsers.run(msg.agentId, msg.op, msg.args).then(
+      (data) => child.postMessage({ type: 'browser-result', id: msg.id, data }),
+      (e: unknown) => child.postMessage({ type: 'browser-result', id: msg.id, error: e instanceof Error ? e.message : String(e) })
+    )
   } else if (msg.type === 'screenshot') {
     screenshot(msg).then(
       (png) => child.postMessage({ type: 'screenshot-result', id: msg.id, data: png.toString('base64') }),
@@ -129,8 +140,11 @@ ipcMain.on('core:connect', (event) => {
 
 // Brings the window back (closing it keeps the app and its routines running),
 // optionally opening a conversation.
+// The app's own window; agents' browsers are windows too, hidden, and never count as it.
+let mainWindow: BrowserWindow | null = null
+
 function showWindow(conversationId?: string): void {
-  const win = BrowserWindow.getAllWindows()[0] ?? createWindow()
+  const win = mainWindow && !mainWindow.isDestroyed() ? mainWindow : createWindow()
   if (win.isMinimized()) win.restore()
   win.show()
   win.focus()
@@ -169,6 +183,10 @@ function createWindow(): BrowserWindow {
   })
 
   win.once('ready-to-show', () => win.show())
+  mainWindow = win
+  win.on('closed', () => {
+    if (mainWindow === win) mainWindow = null
+  })
 
   // Links in messages open in the default browser, never inside the app.
   win.webContents.setWindowOpenHandler(({ url }) => {
@@ -201,13 +219,15 @@ if (primary) app.whenReady().then(() => {
   powerMonitor.on('resume', () => core?.postMessage({ type: 'power', awake: true }))
   createWindow()
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow()
+    if (!mainWindow || mainWindow.isDestroyed()) createWindow()
   })
 })
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit()
 })
+
+app.on('before-quit', () => browsers.quit())
 
 app.on('will-quit', () => {
   core?.kill()

@@ -1,5 +1,5 @@
 // The contract between the renderer and the core, carried over a MessagePort.
-import type { Agent, Approval, Artifact, ComputerInfo, Connector, ConnectorInput, ConnectorTool, Conversation, EngineId, Memory, MemoryScope, Message, Project, Routine, RoutineInput, Report, Settings, Skill, SkillInput, SkillVersion, Trigger } from './types'
+import type { Agent, Approval, Artifact, BrowserView, ComputerInfo, Connector, ConnectorInput, ConnectorTool, Conversation, EngineId, Memory, MemoryScope, Message, Project, Routine, RoutineInput, Report, Settings, Skill, SkillInput, SkillVersion, Trigger } from './types'
 
 export interface Snapshot {
   settings: Settings
@@ -11,6 +11,7 @@ export interface Snapshot {
   memories: Memory[]
   artifacts: Artifact[]
   computers: ComputerInfo[]
+  browsers: BrowserView[]
   routines: Routine[]
   skills: Skill[]
   packaged: boolean // installed app, not `npm run dev` (opening at login only works there)
@@ -46,6 +47,7 @@ export interface Api {
   summarizeNow(p: { conversationId: string }): void
   computerAction(p: { agentId: string; action: 'start' | 'restart' | 'erase' | 'open_folder' | 'refresh' }): void
   stopService(p: { agentId: string; name: string }): void
+  browserAction(p: { agentId: string; action: 'show' | 'hide' | 'clear' }): void // show: I take over the agent's browser; clear: logins and history go
   lendFolder(p: { agentId: string; path: string }): void // throws why it can't, for the page
   setProject(p: { conversationId: string; project: Project | null }): void // throws why the folder can't be used
   folderAction(p: { agentId: string; name: string; action: 'read_only' | 'read_write' | 'return' }): void
@@ -87,6 +89,7 @@ export type CoreEvent =
   | { type: 'memory'; memory: Memory }
   | { type: 'memory_removed'; id: string }
   | { type: 'computer'; computer: ComputerInfo }
+  | { type: 'browser'; view: BrowserView }
   | { type: 'artifact'; artifact: Artifact }
   | { type: 'routine'; routine: Routine }
   | { type: 'routine_removed'; id: string }

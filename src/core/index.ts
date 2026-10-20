@@ -8,7 +8,7 @@ import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import type { MessagePortMain } from 'electron'
 import type { Api, CoreEvent, Method, Request, Wire } from '../shared/rpc'
-import { ENGINES, inQuietHours, WEBHOOK_PORT, type Agent, type Message, type EngineId, type EngineStatus, type Settings } from '../shared/types'
+import { ENGINES, inQuietHours, WEBHOOK_PORT, type Agent, type BrowserReply, type Message, type EngineId, type EngineStatus, type Settings } from '../shared/types'
 import { Db } from './db'
 import { claudeEngine } from './engines/claude'
 import { codexEngine } from './engines/codex'
@@ -25,6 +25,7 @@ import { Skills } from './skills'
 import { backup, backupIfDue, exportTeam, importTeam } from './team'
 import { Telegram } from './telegram'
 import { mainCipher, plainCipher, Secrets } from './secrets'
+import { Browser, type BrowserHost } from './browser'
 import { checkFolder, Computers, folderName, type Shooter } from './computer'
 import { Memories } from './memory'
 import { cleanFiles, defaultFiles, projectFolders } from './projects'
@@ -118,14 +119,24 @@ const toMain = (msg: ToMain): void =>
 
 // Screenshots use Electron's Chromium, which lives in the main process.
 const shots = new Map<string, { resolve: (b: Buffer) => void; reject: (e: Error) => void }>()
+// Agents' browsers too (spec §24).
+const pages = new Map<string, { resolve: (r: BrowserReply) => void; reject: (e: Error) => void }>()
 process.parentPort.on('message', (e) => {
-  const r = e.data as { type?: string; id: string; data?: string; error?: string; awake?: boolean } | undefined
+  const r = e.data as { type?: string; id: string; data?: unknown; error?: string; awake?: boolean; agentId?: string; shown?: boolean } | undefined
   if (r?.type === 'power') return routines.setAwake(r.awake === true)
+  if (r?.type === 'browser-shown') return browser.setShown(r.agentId ?? '', r.shown === true)
+  if (r?.type === 'browser-result') {
+    const p = pages.get(r.id)
+    pages.delete(r.id)
+    if (r.error !== undefined) p?.reject(new Error(r.error))
+    else p?.resolve(r.data as BrowserReply)
+    return
+  }
   if (r?.type !== 'screenshot-result') return
   const p = shots.get(r.id)
   shots.delete(r.id)
   if (r.error !== undefined) p?.reject(new Error(r.error))
-  else p?.resolve(Buffer.from(r.data ?? '', 'base64'))
+  else p?.resolve(Buffer.from(String(r.data ?? ''), 'base64'))
 })
 const shoot: Shooter = (opts) =>
   new Promise((resolve, reject) => {
@@ -134,7 +145,23 @@ const shoot: Shooter = (opts) =>
     process.parentPort.postMessage({ type: 'screenshot', id, ...opts })
   })
 
+const host: BrowserHost = (agentId, op, args) =>
+  new Promise((resolve, reject) => {
+    const id = randomUUID()
+    pages.set(id, { resolve, reject })
+    process.parentPort.postMessage({ type: 'browser', id, agentId, op, args })
+    setTimeout(() => pages.get(id) && (pages.delete(id), reject(new Error('o navegador não respondeu em 60 s'))), 60_000).unref()
+  })
+
 const secrets = new Secrets(db, fake ? plainCipher : mainCipher(process.parentPort))
+const browser = new Browser({
+  host,
+  db,
+  dataDir,
+  emit,
+  me: () => settings().workspaceName,
+  jev: { key: () => secrets.get(JEV_SECRET), on: () => !!settings().browserJev && settings().jevKey === true }
+})
 const connectors = new ConnectorManager({
   db,
   secrets,
@@ -189,6 +216,7 @@ const runner = new Runner({
   connectors,
   memory,
   computers,
+  browser,
   routines,
   skills,
   // Approvals reach the phone with their buttons, through toPhone.
@@ -304,6 +332,7 @@ const api: Api = {
     memories: db.memories(),
     artifacts: db.artifacts(),
     computers: db.agents().map((a) => computers.info(a)),
+    browsers: browser.list(),
     routines: db.routines(),
     skills: db.skills(),
     packaged: process.env['AGENT_DESK_PACKAGED'] === '1',
@@ -336,6 +365,7 @@ const api: Api = {
       })
     if (mac(before) && !mac(clean)) void computers.mac.stopAll(clean.id).then(() => computers.refresh(clean))
     if (mac(clean) && !mac(before)) void computers.refresh(clean)
+    if (before?.browser && !clean.browser) void browser.close(clean.id) // its logins stay, for when it's turned back on
     const changed = db.setAgentChannels(clean.id, channelIds)
     emit({ type: 'agent', agent: db.agent(clean.id)! })
     emitConversations(changed)
@@ -431,6 +461,10 @@ const api: Api = {
     void run().catch((e: unknown) => console.error('[computer]', e))
   },
   stopService: ({ agentId, name }) => void computers.stopService(agentId, name),
+  browserAction: ({ agentId, action }) => {
+    const agent = db.agent(agentId)
+    if (agent) void browser.action(agent, action).catch((e: unknown) => console.error('[navegador]', e))
+  },
 
   // Lending or returning a folder remakes the computer with the new mounts (what it installed stays).
   lendFolder: ({ agentId, path }) => {

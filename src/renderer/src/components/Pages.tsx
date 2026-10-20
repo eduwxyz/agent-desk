@@ -22,6 +22,7 @@ import {
   updateTool,
   updateSettings,
   setJevKey,
+  browserAction,
   setTelegramToken,
   unpairTelegram,
   setGithubToken,
@@ -311,6 +312,38 @@ export function AgentPage({ id }: { id?: string }): ReactNode {
                 </button>
               ))}
             </div>
+          </Card>
+
+          <Card
+            title="Navegador"
+            lead={`Um Chrome só dele: abre páginas, clica, preenche e lê como uma pessoa, com logins separados dos seus (você entra pelo Assumir). Clique que compra, publica, envia ou apaga pede sua aprovação.${isNew ? '' : ' Muda na hora, sem precisar salvar.'}`}
+          >
+            <div className="segmented segmented--wide" role="radiogroup" aria-label="Navegador">
+              {[false, true].map((v) => (
+                <button
+                  key={String(v)}
+                  role="radio"
+                  aria-checked={!!draft.browser === v}
+                  className={!!draft.browser === v ? 'is-active' : ''}
+                  onClick={() => (isNew ? patch({ browser: v }) : (setDraft((d) => ({ ...d, browser: v })), patchAgent(draft.id, { browser: v })))}
+                >
+                  {v ? 'Ligado' : 'Desligado'}
+                </button>
+              ))}
+            </div>
+            {!isNew && draft.browser && (
+              <div className="row computer__actions">
+                <button className="btn btn--sm btn--ghost" title="Abre a janela do navegador dele pra você entrar nas contas" onClick={() => browserAction(draft.id, 'show')}>
+                  Abrir o navegador dele
+                </button>
+                <button
+                  className="btn btn--sm btn--ghost"
+                  onClick={() => confirm(`Apagar os logins, cookies e histórico do navegador de ${draft.name}?`) && browserAction(draft.id, 'clear')}
+                >
+                  Apagar logins
+                </button>
+              </div>
+            )}
           </Card>
 
           {!isNew && (
@@ -1307,7 +1340,7 @@ function PhoneCard({ info }: { info?: TelegramInfo }): ReactNode {
 }
 
 // The TypeSafe key for the Jev router: checked by the core, kept encrypted, never shown again.
-function JevKey({ saved }: { saved: boolean }): ReactNode {
+function JevKey({ saved, hint }: { saved: boolean; hint?: string }): ReactNode {
   const [key, setKey] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -1322,7 +1355,8 @@ function JevKey({ saved }: { saved: boolean }): ReactNode {
   return (
     <>
       <p className="hint">
-        <Icon name="shield" size={13} /> Decide em menos de 1 segundo, mas cada decisão manda as últimas 10 mensagens do canal pra TypeSafe e é cobrada na sua conta de lá (centavos por mês). Se ele falhar, o Haiku decide.
+        <Icon name="shield" size={13} />{' '}
+        {hint ?? 'Decide em menos de 1 segundo, mas cada decisão manda as últimas 10 mensagens do canal pra TypeSafe e é cobrada na sua conta de lá (centavos por mês). Se ele falhar, o Haiku decide.'}
       </p>
       {saved ? (
         <div className="row">
@@ -1418,6 +1452,22 @@ export function SettingsPage(): ReactNode {
             </select>
           </Field>
           {settings.routerModel === 'jev' && <JevKey saved={!!settings.jevKey} />}
+        </Card>
+
+        <Card title="Navegador dos agentes" lead="Como o app acha o que o agente pede pra clicar (“o botão Buscar”). Pelo texto é de graça e resolve a maioria; quando não acha, o agente usa o número do elemento.">
+          <div className="segmented segmented--wide" role="radiogroup" aria-label="Navegador dos agentes">
+            {[false, true].map((v) => (
+              <button key={String(v)} role="radio" aria-checked={!!settings.browserJev === v} className={!!settings.browserJev === v ? 'is-active' : ''} onClick={() => updateSettings({ browserJev: v })}>
+                {v ? 'Jev (TypeSafe)' : 'Só pelo texto da página'}
+              </button>
+            ))}
+          </div>
+          {settings.browserJev && (
+            <JevKey
+              saved={!!settings.jevKey}
+              hint="Acha o elemento em menos de 1 segundo, até sem texto (pelo print da tela). Mas cada clique que o texto não resolve manda pra TypeSafe a lista de elementos da página e, às vezes, o print dela, inclusive em áreas logadas."
+            />
+          )}
         </Card>
 
         <PhoneCard info={settings.telegram} />

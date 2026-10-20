@@ -308,6 +308,17 @@ Cada agente tem um de três computadores, escolhido na página dele: **nenhum** 
 - **Confirmação ao ligar**, dizendo o que o agente passa a alcançar; selo "no seu Mac" na barra lateral e em cada mensagem dele; o prompt pede que mexa só no que a tarefa pede, não toque em credenciais nem em outros projetos, não instale nada no sistema sem dizer e só faça push, deploy ou publicação quando o usuário pedir.
 - Trocar pra Linux ou nenhum para os serviços dele no Mac; trocar do Linux pro Mac para o container.
 
+### 24. Navegador (M14)
+
+Um agente com o navegador ligado mexe em páginas como uma pessoa: abre, clica, escreve, aperta teclas, rola, volta, lê e olha a tela. Serve pro que a web do motor (§16) não alcança: área logada (YouTube Studio, TikTok Studio), páginas que bloqueiam leitura automática com captcha, formulários e buscas com calendário.
+
+- **Um Chrome por agente**, no processo principal (Chromium do Electron), numa janela escondida com sessão própria (`persist:navegador-<agente>`): os logins ficam entre conversas e separados de tudo (do usuário, dos prints, dos outros agentes). O user agent é o do Chrome, sem "Electron". Sem câmera, microfone, localização, notificações nem downloads. Nova aba abre no lugar.
+- **Ferramentas:** `navegador_abrir`, `navegador_clicar`, `navegador_digitar` (troca o que há no campo; lista escolhe a opção; Enter opcional), `navegador_tecla`, `navegador_rolar`, `navegador_voltar`, `navegador_ler` (texto da página inteira, shadow DOM incluído, e a lista completa), `navegador_ver` (o print pro agente; opcionalmente no chat), `navegador_esperar`. Cada ação devolve título, endereço e os elementos da tela numerados (papel, texto, valor; senha mascarada).
+- **Onde clicar:** o agente diz o alvo em palavras ("o botão Buscar") ou pelo número. O app acha pelo número, pelo texto exato ou pelo único texto da tela que o contém. Se não acha e o usuário escolheu o **Jev** (Configurações, Navegador dos agentes), pergunta ao Jev qual elemento é (Choice sobre a lista, ~1 s) e, se nenhum serve, onde está no print (Box, experimental no TypeSafe). Sem o Jev, devolve os parecidos e pede o número. Ligar o Jev manda a lista de elementos e às vezes o print pro TypeSafe, inclusive de área logada; por isso é escolha do usuário.
+- **Governança:** clique cujo texto compra, paga, publica, posta, envia, agenda, salva, comenta, segue, reserva ou apaga vira um pedido de aprovação, com o print da tela no chat. Aprovado, o app clica só se a página ainda for a mesma e o botão com aquele texto ainda estiver lá; senão conta ao agente que a página mudou. Nunca vale "sempre permitir". O que está escrito na página é informação, não instrução.
+- **Assumir:** o painel do navegador (aberto pelo cartão "Navegador de X" na mensagem) mostra a tela ao vivo e as últimas ações. "Assumir" mostra a mesma janela pra o usuário entrar numa conta, digitar um código ou passar um captcha; fechar a janela devolve. Enquanto o usuário está com ela, o agente só lê, olha e espera. O prompt pede que, diante de login, senha, código ou captcha, o agente pergunte em vez de tentar. "Apagar logins" na página do agente limpa a sessão.
+- Ligado por agente, desligado por padrão. Desligar fecha a janela e mantém os logins.
+
 ## Acceptance criteria
 
 1. **Chat básico:** crio um agente no Claude Code, abro DM, mando uma mensagem e vejo a resposta em streaming, com rodapé de modelo/tokens/duração. O mesmo funciona com um agente no Codex.
@@ -350,6 +361,7 @@ Cada agente tem um de três computadores, escolhido na página dele: **nenhum** 
 29. **Celular (M11):** com o bot pareado, uma aprovação chega no Telegram com botões e o toque decide; uma ação de alto risco pede dois toques; uma pergunta respondida no Telegram vira a minha mensagem na conversa; outro chat não consegue nada.
 30. **Da issue à PR (M12):** o Staff faz commit em `agent/x` e `git push`; passa, com a linha no canal; um push na main é recusado com o motivo; `abrir_pr` vira um pedido, e aprovado abre a PR com o custo da issue.
 31. **Governança no dia a dia (M12):** "Aprovar e sempre permitir" faz a próxima chamada igual rodar sem pedido (não pra alto risco); um agente sem acesso pede e, aprovado, ganha o grant e continua; pausado, ninguém responde nem roda rotina; o boletim mostra cada agente e o custo por issue.
+33. **Navegador (M14):** um agente com o navegador ligado abre o Airbnb, escreve "Chicago" no campo Onde e escolhe a sugestão pelo texto; o painel mostra a tela e as ações; clicar em "Comprar agora" vira aprovação com print e só clica depois de aprovado e na mesma página; com o usuário no Assumir, o agente não clica.
 32. **Computador no Mac (M13):** um agente com "Este Mac" roda `pwd` e cai na pasta do projeto do canal; o PATH é o do terminal do usuário e não tem variável do app; um serviço sobe numa porta do Mac e para com os filhos; trocar pra Linux ou nenhum para os serviços.
 
 ## Out of scope (MVP)
@@ -450,6 +462,7 @@ Cada agente tem um de três computadores, escolhido na página dele: **nenhum** 
 11. **M11, gatilhos, skills e celular (feito):** rotina por item novo num conector ou por chamada local; skills com proposta, diff e histórico; aprovações e perguntas pelo Telegram. (AC 27, 28, 29) Testado de verdade: a chamada local rodou a Lia; o gatilho do Linear olhou e mostrou o erro do conector desautorizado; o Staff leu e propôs skills com o Claude Code real. O Telegram está testado contra uma API simulada; falta o bot real.
 12. **M12, da issue à PR e governança no dia a dia (feito):** proxy de git com push só em agent/* e PR por aprovação; boletim e custo por issue; sempre permitir, pedido de acesso, pausar tudo, horário de silêncio, cota da assinatura, time em .md e backup diário. (AC 30, 31)
 13. **M13, computador no Mac (feito):** nenhum, Linux isolado ou este Mac, por agente, com confirmação e selo. (AC 32)
+14. **M14, navegador (feito):** um Chrome por agente, com ações pelo texto, Jev opcional, tela ao vivo, Assumir e aprovação de cliques arriscados. (AC 33) Testado no Chromium real: formulário, lista, shadow DOM, Enter e aprovação numa página local, e a busca de Chicago no Airbnb.
 
 O MVP termina quando os oito estiverem prontos e eu usar o app por uma semana no dia a dia.
 

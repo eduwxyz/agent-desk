@@ -3,7 +3,7 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { artifactUrl, computerOf, openExternal, openPanel, stopService, useStore, type Artifact } from '../store'
+import { agentById, artifactUrl, browserAction, browserOf, computerOf, openExternal, openPanel, stopService, useStore, type Artifact } from '../store'
 import { call } from '../rpc'
 import { Icon } from './ui'
 
@@ -76,23 +76,86 @@ export function ServiceCard({ agentId, name }: { agentId: string; name: string }
   )
 }
 
+// The agent's browser, from a message where it used it: the page as it is now.
+export function BrowserCard({ agentId }: { agentId: string }): ReactNode {
+  const view = useStore((s) => browserOf(s, agentId))
+  const name = useStore((s) => agentById(s, agentId)?.name ?? 'agente')
+  const open = useStore((s) => s.panel?.kind === 'browser' && s.panel.agentId === agentId)
+  return (
+    <button className={`artifact-card browser-card ${open ? 'is-open' : ''}`} onClick={() => openPanel({ kind: 'browser', agentId })}>
+      {view?.frame ? (
+        <img className="browser-card__thumb" src={view.frame} alt="" />
+      ) : (
+        <span className="artifact-card__icon">
+          <Icon name="globe" size={16} />
+        </span>
+      )}
+      <span className="artifact-card__text">
+        <strong>Navegador de {name}</strong>
+        <span className="muted small">{view?.shown ? 'Você está no controle' : view?.title || view?.url || 'Nenhuma página aberta'}</span>
+      </span>
+      <span className="artifact-card__open">Ver</span>
+    </button>
+  )
+}
+
+function BrowserPanel({ agentId }: { agentId: string }): ReactNode {
+  const view = useStore((s) => browserOf(s, agentId))
+  if (!view?.url && !view?.frame) return <p className="empty">O navegador ainda não abriu nenhuma página.</p>
+  return (
+    <div className="browser-view">
+      {view.shown && <p className="browser-view__note">A janela do navegador está aberta pra você. Faça o que precisar (login, código, captcha) e feche a janela pra devolver.</p>}
+      {view.frame && <img className="browser-view__frame" src={view.frame} alt={view.title} />}
+      {view.log.length > 0 && (
+        <ol className="browser-log">
+          {[...view.log].reverse().map((l, i) => (
+            <li key={`${l.at}-${i}`}>
+              <span>
+                {l.label}
+                {l.detail && <span className="muted"> · {l.detail}</span>}
+              </span>
+              <time className="muted">{new Date(l.at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</time>
+            </li>
+          ))}
+        </ol>
+      )}
+    </div>
+  )
+}
+
 export function SidePanel(): ReactNode {
   const panel = useStore((s) => s.panel)
   const artifact = useStore((s) => (s.panel?.kind === 'artifact' ? s.artifacts.find((a) => a.id === (s.panel as { id: string }).id) : undefined))
   const service = useStore((s) =>
     s.panel?.kind === 'service' ? computerOf(s, s.panel.agentId)?.services.find((x) => x.name === (s.panel as { name: string }).name) : undefined
   )
+  const browser = useStore((s) => (s.panel?.kind === 'browser' ? browserOf(s, s.panel.agentId) : undefined))
+  const browserName = useStore((s) => (s.panel?.kind === 'browser' ? agentById(s, s.panel.agentId)?.name : undefined))
   const [reload, setReload] = useState(0)
   if (!panel) return null
 
-  const title = artifact?.title ?? service?.name ?? ''
+  const title = artifact?.title ?? service?.name ?? (panel.kind === 'browser' ? `Navegador de ${browserName ?? 'agente'}` : '')
   return (
     <aside className="side-panel">
       <header className="side-panel__head">
-        <Icon name={panel.kind === 'service' ? 'globe' : 'edit'} size={14} />
+        <Icon name={panel.kind === 'service' || panel.kind === 'browser' ? 'globe' : 'edit'} size={14} />
         <strong className="side-panel__title">{title}</strong>
         {service?.url && <code className="side-panel__url">{service.url}</code>}
+        {browser?.url && (
+          <code className="side-panel__url" title={browser.url}>
+            {browser.url.replace(/^https?:\/\//, '').slice(0, 60)}
+          </code>
+        )}
         <span className="grow" />
+        {panel.kind === 'browser' && browser?.url && (
+          <button
+            className={`btn btn--sm ${browser.shown ? 'btn--ghost' : 'btn--primary'}`}
+            title={browser.shown ? 'Fecha a janela e devolve o navegador' : 'Abre a janela do navegador pra você usar (login, captcha)'}
+            onClick={() => browserAction(panel.agentId, browser.shown ? 'hide' : 'show')}
+          >
+            {browser.shown ? 'Devolver' : 'Assumir'}
+          </button>
+        )}
         {service?.url && (
           <>
             <button className="icon-btn" title="Recarregar" onClick={() => setReload((n) => n + 1)}>
@@ -117,6 +180,7 @@ export function SidePanel(): ReactNode {
             <p className="empty">Esse serviço não está rodando.</p>
           ))}
         {panel.kind === 'artifact' && !artifact && <p className="empty">Arquivo não encontrado.</p>}
+        {panel.kind === 'browser' && <BrowserPanel agentId={panel.agentId} />}
       </div>
     </aside>
   )

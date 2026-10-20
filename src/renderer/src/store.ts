@@ -7,6 +7,7 @@ import {
   type Agent,
   type Approval,
   type Artifact,
+  type BrowserView,
   type ComputerInfo,
   type Connector,
   type ConnectorInput,
@@ -58,6 +59,7 @@ export interface State {
   memories: Memory[]
   artifacts: Artifact[]
   computers: ComputerInfo[]
+  browsers: BrowserView[]
   routines: Routine[]
   skills: Skill[]
   packaged: boolean
@@ -65,7 +67,7 @@ export interface State {
   demoServer?: { command: string; args: string[] }
 }
 
-export type Panel = { kind: 'artifact'; id: string } | { kind: 'service'; agentId: string; name: string }
+export type Panel = { kind: 'artifact'; id: string } | { kind: 'service'; agentId: string; name: string } | { kind: 'browser'; agentId: string }
 
 const initials = (name: string): string =>
   name
@@ -99,6 +101,7 @@ let state: State = {
   memories: [],
   artifacts: [],
   computers: [],
+  browsers: [],
   routines: [],
   skills: [],
   packaged: false,
@@ -194,6 +197,10 @@ function apply(e: CoreEvent): void {
         const others = s.computers.filter((c) => c.agentId !== e.computer.agentId)
         return { ...s, computers: [...others, e.computer] }
       }
+      case 'browser': {
+        const others = s.browsers.filter((b) => b.agentId !== e.view.agentId)
+        return { ...s, browsers: [...others, e.view] }
+      }
       case 'routine':
         return { ...s, routines: upsert(s.routines, e.routine) }
       case 'routine_removed':
@@ -225,6 +232,7 @@ export async function start(): Promise<void> {
       memories: snap.memories,
       artifacts: snap.artifacts,
       computers: snap.computers,
+      browsers: snap.browsers,
       routines: snap.routines,
       skills: snap.skills,
       packaged: snap.packaged,
@@ -239,6 +247,7 @@ export const agentById = (s: State, id: string): Agent | undefined => s.agents.f
 export const modelById = (s: State, id: string): Model | undefined => s.models.find((m) => m.id === id)
 export const pendingApprovals = (s: State): Approval[] => s.approvals.filter((a) => a.state === 'pending')
 export const computerOf = (s: State, agentId: string): ComputerInfo | undefined => s.computers.find((c) => c.agentId === agentId)
+export const browserOf = (s: State, agentId: string): BrowserView | undefined => s.browsers.find((b) => b.agentId === agentId)
 export const pendingMemories = (s: State): Memory[] => s.memories.filter((m) => m.state === 'pending')
 
 export function conversationTitle(s: State, c: Conversation): string {
@@ -343,6 +352,7 @@ export const openPanel = (panel: Panel | null): void => set((s) => ({ ...s, pane
 export const computerAction = (agentId: string, action: 'start' | 'restart' | 'erase' | 'open_folder' | 'refresh'): void =>
   void call('computerAction', { agentId, action })
 export const stopService = (agentId: string, name: string): void => void call('stopService', { agentId, name })
+export const browserAction = (agentId: string, action: 'show' | 'hide' | 'clear'): void => void call('browserAction', { agentId, action })
 export const openExternal = (url: string): void => void call('openExternal', { url })
 
 export const saveRoutine = (routine: RoutineInput): Promise<Routine> => call('saveRoutine', { routine })

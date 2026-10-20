@@ -31,7 +31,7 @@ import {
   type Step
 } from '../store'
 import { AgentAvatar, Icon, MeAvatar, duration, time, tokens, usd } from './ui'
-import { ArtifactCard, ServiceCard, SidePanel } from './Panel'
+import { ArtifactCard, BrowserCard, ServiceCard, SidePanel } from './Panel'
 import { when } from './Routines'
 import { ProjectPanel } from './Project'
 
@@ -211,6 +211,7 @@ function MessageRow({ message, grouped }: { message: Message; grouped: boolean }
           </div>
         )}
         {agent && message.run?.services?.map((name) => <ServiceCard key={name} agentId={agent.id} name={name} />)}
+        {agent && message.run?.browser && <BrowserCard agentId={agent.id} />}
         {message.run?.status === 'stopped' && <div className="note">Interrompido por você.</div>}
         {message.run?.status === 'interrupted' && <div className="note">Interrompido: o app fechou no meio da resposta.</div>}
         {message.run?.error && <div className="note note--error">{message.run.error}</div>}
