@@ -240,7 +240,14 @@ export function AgentPage({ id }: { id?: string }): ReactNode {
                           {c.name} {grantSaved === c.id && <span className="saved">Salvo</span>}
                         </strong>
                         <span className="muted small">
-                          {level === 'none'
+                          {c.status === 'needs_auth' ? (
+                            <>
+                              Precisa autorizar ·{' '}
+                              <button className="link" onClick={() => authorizeConnector(c.id)}>
+                                Autorizar no navegador
+                              </button>
+                            </>
+                          ) : level === 'none'
                             ? 'Nenhuma ferramenta exposta'
                             : level === 'read'
                               ? `${c.tools.filter((t) => t.cls === 'read' && t.enabled).length} ferramentas de leitura`
