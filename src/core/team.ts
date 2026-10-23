@@ -5,7 +5,7 @@
 import { existsSync, mkdirSync, readdirSync, rmSync, statSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
 import { join } from 'node:path'
-import { describeSchedule, MODELS, type Agent, type AgentColor, type Effort, type GrantLevel, type Routine, type Schedule, type Trigger } from '../shared/types'
+import { describeSchedule, modelInfo, type Agent, type AgentColor, type Effort, type GrantLevel, type Routine, type Schedule, type Trigger } from '../shared/types'
 import type { Db } from './db'
 
 const FENCE = 'agent-desk-team'
@@ -75,7 +75,7 @@ export function exportTeam(db: Db): string {
     `Exportado em ${new Date().toLocaleString('pt-BR')}. Sem credenciais, memórias nem conversas. Pra usar em outro Mac: Configurações → Time → Importar.`,
     '',
     '## Agentes',
-    ...data.agents.map((a) => `- **${a.name}** (@${a.handle})${a.role ? ` · ${a.role}` : ''} · ${MODELS.find((m) => m.id === a.model)?.label ?? a.model}${a.computer ? ' · com computador' : ''}${Object.keys(a.grants).length ? ` · acessa ${Object.keys(a.grants).join(', ')}` : ''}`),
+    ...data.agents.map((a) => `- **${a.name}** (@${a.handle})${a.role ? ` · ${a.role}` : ''} · ${modelInfo(a.model)?.label ?? a.model}${a.computer ? ' · com computador' : ''}${Object.keys(a.grants).length ? ` · acessa ${Object.keys(a.grants).join(', ')}` : ''}`),
     '',
     ...(data.skills.length ? ['## Skills', ...data.skills.map((k) => `- **${k.name}**: ${k.description}`), ''] : []),
     ...(data.channels.length ? ['## Canais', ...data.channels.map((c) => `- #${c.name}: ${c.members.map((h) => `@${h}`).join(', ') || 'sem agentes'}`), ''] : []),
@@ -116,7 +116,7 @@ export function importTeam(db: Db, text: string, defaultLimit: number): string {
       role: a.role ?? '',
       color: a.color ?? 'sky',
       instructions: a.instructions ?? '',
-      modelId: MODELS.some((x) => x.id === a.model) ? a.model : 'sonnet',
+      modelId: modelInfo(a.model)?.id ? a.model : 'sonnet',
       effort: a.effort ?? 'medium',
       limit: a.limit || defaultLimit,
       used: 0,

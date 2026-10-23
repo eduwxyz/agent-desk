@@ -30,6 +30,7 @@ import { ChromeBrowsers, hasChrome } from './chrome'
 import { checkFolder, Computers, folderName, type Shooter } from './computer'
 import { Memories } from './memory'
 import { cleanFiles, defaultFiles, projectFolders } from './projects'
+import { loginEnv } from './mac'
 import { Routines } from './routines'
 import { Runner } from './runs'
 import { seed } from './seed'
@@ -74,7 +75,7 @@ const githubInfo = (): Settings['github'] => githubRef?.info()
 
 const engineImpls: Record<EngineId, Engine> = fake
   ? { claude: fakeEngine('claude'), codex: fakeEngine('codex') }
-  : { claude: claudeEngine(() => engines.claude.path), codex: codexEngine(() => engines.codex.path, codexHome) }
+  : { claude: claudeEngine(() => engines.claude.path), codex: codexEngine(() => engines.codex.path, codexHome, loginEnv) }
 
 // ---------- ports ----------
 

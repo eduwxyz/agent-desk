@@ -37,6 +37,8 @@ import {
   RUN_BUDGET_PCT,
   RUN_STALL_MINUTES,
   countedTokens,
+  customModel,
+  modelInfo,
   type Agent,
   type AgentColor,
   type Connector,
@@ -112,7 +114,7 @@ export function AgentPage({ id }: { id?: string }): ReactNode {
     : handles.some(([aid, h]) => h === draft.handle && aid !== draft.id)
       ? `@${draft.handle} já existe.`
       : null
-  const canSave = draft.name.trim().length > 0 && !handleError
+  const canSave = draft.name.trim().length > 0 && !handleError && !!modelInfo(draft.modelId)?.id
   const patch = (p: Partial<Agent>): void => {
     setDraft((d) => ({ ...d, ...p }))
     setSaved(false)
@@ -125,7 +127,8 @@ export function AgentPage({ id }: { id?: string }): ReactNode {
     else setSaved(true)
   }
 
-  const model = models.find((m) => m.id === draft.modelId)
+  const model = modelInfo(draft.modelId)
+  const custom = !models.some((m) => m.id === draft.modelId)
   const engine: EngineId = model?.engine ?? 'claude'
   const engineStatus = engines[engine]
   const pickEngine = (e: EngineId): void => {
@@ -426,6 +429,17 @@ export function AgentPage({ id }: { id?: string }): ReactNode {
                     <span className="muted small">{m.hint}</span>
                   </label>
                 ))}
+              <div className={`model model--custom ${custom ? 'is-active' : ''}`} onClick={() => !custom && patch({ modelId: customModel(engine, '') })}>
+                <strong>Outro modelo</strong>
+                <input
+                  className="model__name"
+                  value={custom ? (model?.id ?? '') : ''}
+                  placeholder={engine === 'claude' ? 'ex.: claude-sonnet-4-5' : 'ex.: gpt-4.1'}
+                  spellCheck={false}
+                  onChange={(e) => patch({ modelId: customModel(engine, e.target.value) })}
+                />
+                <span className="muted small">O nome exato que o gateway da sua empresa usa.</span>
+              </div>
             </div>
             <div className="grid2">
               <Field label="Esforço de raciocínio" hint="Mais esforço pensa mais e gasta mais do plano.">
@@ -903,7 +917,7 @@ export function UsagePage(): ReactNode {
 }
 
 function ModelLabel({ id }: { id: string }): ReactNode {
-  const m = useStore((s) => s.models.find((x) => x.id === id))
+  const m = modelInfo(id)
   return <>{m ? `${ENGINES[m.engine].label} · ${m.label}` : id}</>
 }
 

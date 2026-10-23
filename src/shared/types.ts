@@ -254,7 +254,14 @@ export const EFFORTS: { id: Effort; label: string }[] = [
   { id: 'xhigh', label: 'Máximo' }
 ]
 
-export const modelInfo = (id: string): Model | undefined => MODELS.find((m) => m.id === id)
+// A model the app doesn't list, by the name a company gateway gives it: kept as "<engine>:<name>".
+export const customModel = (engine: EngineId, name: string): string => `${engine}:${name.trim()}`
+export const modelInfo = (id: string): Model | undefined => {
+  const listed = MODELS.find((m) => m.id === id)
+  if (listed) return listed
+  const m = /^(claude|codex):(.*)$/s.exec(id)
+  return m ? { id: m[2]!.trim(), engine: m[1] as EngineId, label: m[2]!.trim(), hint: 'Nome próprio' } : undefined
+}
 
 export interface ConnectorTool {
   name: string

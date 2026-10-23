@@ -1,4 +1,7 @@
+import { readFileSync } from 'node:fs'
+import { homedir } from 'node:os'
 import { join } from 'node:path'
+import { parse } from 'smol-toml'
 import { GATEWAY_NAME } from './claude'
 import { lastLines, num, parseJson, runCli, type Parser } from './cli'
 import type { Engine, EngineEvent, Turn } from './types'
@@ -8,6 +11,47 @@ import type { Engine, EngineEvent, Turn } from './types'
 // own. The user logs into Codex once more, for the app, through Codex itself.
 export function codexEnv(home: string): NodeJS.ProcessEnv {
   return { ...process.env, HOME: home, CODEX_HOME: join(home, '.codex') }
+}
+
+// How the user's own Codex reaches the model, from their config.toml: the
+// provider it uses (a company gateway: base_url, and the variable that holds
+// its key) and the OpenAI base URL. --ignore-user-config leaves the rest out
+// (MCP servers, profiles, rules). Read at every turn.
+export interface CodexProvider {
+  config: string[] // -c flags
+  envNames: string[] // variables of the user's shell the provider reads
+  baseUrl?: string
+}
+
+export function userCodexProvider(dir = process.env['CODEX_HOME'] || join(homedir(), '.codex')): CodexProvider {
+  let c: Record<string, unknown>
+  try {
+    c = parse(readFileSync(join(dir, 'config.toml'), 'utf8'))
+  } catch {
+    return { config: [], envNames: [] }
+  }
+  const config: string[] = []
+  const envNames = ['OPENAI_BASE_URL']
+  const id = typeof c['model_provider'] === 'string' ? c['model_provider'] : undefined
+  const p = id ? (c['model_providers'] as Record<string, Record<string, unknown>> | undefined)?.[id] : undefined
+  if (id) config.push('-c', `model_provider=${toml(id)}`)
+  // -c splits its key on dots and takes no quotes, so only plain ids pass
+  if (id && p && typeof p === 'object' && /^[\w-]+$/.test(id)) {
+    config.push('-c', `model_providers.${id}=${toml(p)}`)
+    if (typeof p['env_key'] === 'string') envNames.push(p['env_key'])
+    const headers = p['env_http_headers']
+    if (headers && typeof headers === 'object') envNames.push(...Object.values(headers).filter((v): v is string => typeof v === 'string'))
+  }
+  if (typeof c['openai_base_url'] === 'string') config.push('-c', `openai_base_url=${toml(c['openai_base_url'])}`)
+  const baseUrl = typeof p?.['base_url'] === 'string' ? p['base_url'] : typeof c['openai_base_url'] === 'string' ? c['openai_base_url'] : undefined
+  return { config, envNames, ...(baseUrl ? { baseUrl } : {}) }
+}
+
+// A value as inline TOML, the form -c takes.
+function toml(v: unknown): string {
+  if (Array.isArray(v)) return `[${v.map(toml).join(', ')}]`
+  if (v && typeof v === 'object') return `{ ${Object.entries(v).map(([k, x]) => `${JSON.stringify(k)} = ${toml(x)}`).join(', ')} }`
+  return JSON.stringify(v)
 }
 
 // Built-in capabilities agents must not have: their tools come only from the gateway.
@@ -37,7 +81,7 @@ export const CODEX_DISABLED_FEATURES = [
 // read-only sandbox in an empty directory as a last line of defense. The prompt comes from stdin ("-"). The app's gateway,
 // when given, is the only MCP server, with its tools approved up front: the
 // gateway decides what runs.
-export function codexArgs(turn: Pick<Turn, 'model' | 'effort' | 'system' | 'cwd' | 'mcpUrl' | 'web'>): string[] {
+export function codexArgs(turn: Pick<Turn, 'model' | 'effort' | 'system' | 'cwd' | 'mcpUrl' | 'web'>, provider: string[] = []): string[] {
   const gateway = turn.mcpUrl
     ? [
         '-c', `mcp_servers.${GATEWAY_NAME}.url=${JSON.stringify(turn.mcpUrl)}`,
@@ -62,6 +106,7 @@ export function codexArgs(turn: Pick<Turn, 'model' | 'effort' | 'system' | 'cwd'
     '-c', `web_search=${turn.web ? '"live"' : '"disabled"'}`,
     '-c', 'project_doc_max_bytes=0',
     ...CODEX_DISABLED_FEATURES.flatMap((f) => ['--disable', f]),
+    ...provider,
     ...gateway,
     '-'
   ]
@@ -116,7 +161,7 @@ export function codexParser(): Parser {
   }
 }
 
-export function codexEngine(bin: () => string | undefined, home: string): Engine {
+export function codexEngine(bin: () => string | undefined, home: string, shellEnv: () => Promise<NodeJS.ProcessEnv> = async () => ({})): Engine {
   return {
     id: 'codex',
     async *run(turn) {
@@ -125,7 +170,11 @@ export function codexEngine(bin: () => string | undefined, home: string): Engine
         yield { type: 'error', message: 'O Codex não está instalado. Veja em Configurações.' }
         return
       }
-      yield* runCli({ bin: path, args: codexArgs(turn), stdin: turn.prompt, cwd: turn.cwd, signal: turn.signal, parser: codexParser(), env: codexEnv(home) })
+      // The gateway's key lives in the user's shell (.zshrc), which an app opened from Finder doesn't get.
+      const provider = userCodexProvider()
+      const shell = await shellEnv() // read once per launch
+      const keys = Object.fromEntries(provider.envNames.flatMap((n) => (shell[n] ? [[n, shell[n]]] : [])))
+      yield* runCli({ bin: path, args: codexArgs(turn, provider.config), stdin: turn.prompt, cwd: turn.cwd, signal: turn.signal, parser: codexParser(), env: { ...codexEnv(home), ...keys } })
     }
   }
 }

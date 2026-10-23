@@ -3,7 +3,7 @@ import { access, constants } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { EngineId, EngineStatus } from '../../shared/types'
 import { userProvider } from './claude'
-import { codexEnv } from './codex'
+import { codexEnv, userCodexProvider } from './codex'
 
 function run(bin: string, args: string[], timeout = 15_000, env: NodeJS.ProcessEnv = process.env): Promise<{ code: number; stdout: string; stderr: string }> {
   return new Promise((resolve) => {
@@ -76,6 +76,8 @@ const gatewayHost = (url: string | undefined): string | undefined => {
 export async function detectCodex(home: string): Promise<EngineStatus> {
   const path = await which('codex')
   if (!path) return { installed: false, loggedIn: false }
+  const gateway = gatewayHost(userCodexProvider().baseUrl)
+  if (gateway) return { installed: true, path, version: version((await run(path, ['--version'])).stdout), loggedIn: true, account: `Gateway ${gateway} · pelo seu config.toml` }
   const [v, auth] = await Promise.all([run(path, ['--version']), run(path, ['login', 'status'], 15_000, codexEnv(home))])
   const text = `${auth.stdout}\n${auth.stderr}`
   const loggedIn = auth.code === 0 && /logged in/i.test(text) && !/not logged in/i.test(text)

@@ -4,7 +4,8 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import type { Parser } from '../src/core/engines/cli'
 import { claudeArgs, claudeInput, claudeParser, userProvider } from '../src/core/engines/claude'
-import { CODEX_DISABLED_FEATURES, codexArgs, codexEnv, codexParser } from '../src/core/engines/codex'
+import { CODEX_DISABLED_FEATURES, codexArgs, codexEnv, codexParser, userCodexProvider } from '../src/core/engines/codex'
+import { customModel, modelInfo } from '../src/shared/types'
 import type { EngineEvent } from '../src/core/engines/types'
 
 // Fixtures are real CLI output (Claude Code 2.1.286, Codex 0.153.4), trimmed of local paths.
@@ -84,6 +85,33 @@ describe('Claude Code stream', () => {
     expect(JSON.parse(args[args.indexOf('--settings') + 1]!)).toEqual({ apiKeyHelper: '~/bin/chave' })
     expect(args[args.indexOf('--setting-sources') + 1]).toBe('')
     expect(claudeArgs({ model: 'sonnet', effort: 'low', system: 'x' })).not.toContain('--settings')
+  })
+
+  it("takes the gateway from the user's Codex config: the provider and the variables holding its key, not MCP servers", () => {
+    const dir = mkdtempSync(join(tmpdir(), 'codex-config-'))
+    writeFileSync(
+      join(dir, 'config.toml'),
+      ['model_provider = "empresa"', '[model_providers.empresa]', 'base_url = "https://llm.empresa.com/v1"', 'env_key = "EMPRESA_KEY"', 'env_http_headers = { "X-Time" = "EMPRESA_TIME" }', '[mcp_servers.x]', 'command = "x"'].join('\n')
+    )
+    const p = userCodexProvider(dir)
+    expect(p.baseUrl).toBe('https://llm.empresa.com/v1')
+    expect(p.envNames).toEqual(['OPENAI_BASE_URL', 'EMPRESA_KEY', 'EMPRESA_TIME'])
+    expect(p.config).toEqual([
+      '-c', 'model_provider="empresa"',
+      '-c', 'model_providers.empresa={ "base_url" = "https://llm.empresa.com/v1", "env_key" = "EMPRESA_KEY", "env_http_headers" = { "X-Time" = "EMPRESA_TIME" } }'
+    ])
+    const args = codexArgs({ model: 'gpt-x', effort: 'low', system: 'x', cwd: '/tmp' }, p.config)
+    expect(args).toContain('--ignore-user-config')
+    expect(args.join(' ')).not.toContain('mcp_servers.x')
+    expect(userCodexProvider(join(dir, 'nada'))).toEqual({ config: [], envNames: [] })
+  })
+
+  it('takes model names the app does not list, for the engine they were typed in', () => {
+    expect(modelInfo('opus')?.label).toBe('Opus')
+    expect(modelInfo(customModel('codex', ' gpt-4.1-empresa '))).toMatchObject({ id: 'gpt-4.1-empresa', engine: 'codex' })
+    expect(modelInfo('claude:us.anthropic.claude-sonnet-4-5:0')).toMatchObject({ id: 'us.anthropic.claude-sonnet-4-5:0', engine: 'claude' })
+    expect(modelInfo('claude:')?.id).toBe('')
+    expect(modelInfo('qualquer')).toBeUndefined()
   })
 
   it('sends the conversation as one text block per message, so the next turn reads them from the cache', () => {

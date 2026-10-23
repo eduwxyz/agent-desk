@@ -838,7 +838,7 @@ export class Runner {
     const blocks = transcript({ agent, conversation: conv, messages: history, agents: db.agents(), me: settings.workspaceName, task: opts.task, summary })
     try {
       const events = engines[engineId].run({
-        model: agent.modelId,
+        model: model?.id ?? agent.modelId,
         effort: agent.effort,
         system: systemPrompt({
           agent,
