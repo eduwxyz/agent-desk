@@ -153,6 +153,8 @@ export interface Settings {
   quietHours?: { from: string; to: string } | null // "HH:MM": routines and triggers wait, and run late when it ends; null: off
   quota?: Quota // the Claude subscription's windows, from the last reply (spec §21)
   github?: { user?: string; error?: string } // computed: the GitHub account the app pushes and opens PRs with (spec §22)
+  // The first-run introduction: unset on an existing install (no intro), done:false to show it (a new install, or "Rever a introdução")
+  onboarding?: { done: boolean; checklistHidden?: boolean }
 }
 
 // What the main process does in an agent's browser for the core, and what it answers (spec §24).

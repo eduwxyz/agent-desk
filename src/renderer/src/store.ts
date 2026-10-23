@@ -297,6 +297,9 @@ export function newAgentDraft(): Agent {
   }
 }
 
+// Creates a channel and stays where it is (the caller decides where to go).
+export const newChannel = (name: string): Promise<string> => call('createChannel', { name })
+
 export async function createChannel(name: string): Promise<void> {
   const id = await call('createChannel', { name })
   navigate({ kind: 'conversation', id })

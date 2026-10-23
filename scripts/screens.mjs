@@ -16,7 +16,7 @@ const data = mkdtempSync(join(tmpdir(), 'agent-desk-'))
 for (const dir of [tmpdir(), '/tmp']) rmSync(join(dir, 'agent-desk-demo-tasks.json'), { force: true }) // the demo connector starts from its sample list
 const app = await electron.launch({
   args: ['.'],
-  env: { ...process.env, AGENT_DESK_DATA: data, ...(real ? {} : { AGENT_DESK_FAKE_ENGINES: '1' }) }
+  env: { ...process.env, AGENT_DESK_DATA: data, AGENT_DESK_SEED: '1', ...(real ? {} : { AGENT_DESK_FAKE_ENGINES: '1' }) }
 })
 const win = await app.firstWindow()
 await win.setViewportSize({ width: 1280, height: 820 })

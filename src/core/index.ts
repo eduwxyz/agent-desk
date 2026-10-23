@@ -42,7 +42,12 @@ mkdirSync(dataDir, { recursive: true })
 const db = new Db(join(dataDir, 'agent-desk.db'))
 const codexHome = join(dataDir, 'codex-home')
 mkdirSync(join(codexHome, '.codex'), { recursive: true })
-if (db.created) seed(db)
+// A new install starts empty and the introduction creates the first agent; the
+// fake engines (tests, screenshots) and AGENT_DESK_SEED=1 get the sample team.
+if (db.created) {
+  if (process.env['AGENT_DESK_SEED'] === '1' || (fake && process.env['AGENT_DESK_SEED'] !== '0')) seed(db)
+  else db.setSettings({ onboarding: { done: false } })
+}
 const interrupted = db.interruptStaleRuns()
 if (interrupted) console.log(`[core] ${interrupted} run(s) marked as interrupted`)
 

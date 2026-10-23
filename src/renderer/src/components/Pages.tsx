@@ -1416,6 +1416,16 @@ export function SettingsPage(): ReactNode {
           <Field label="Contexto" hint="Entra em toda conversa de todo agente: quem você é, o que faz, o que importa agora e o que nunca fazer.">
             <textarea rows={5} value={settings.context} onChange={(e) => updateSettings({ context: e.target.value })} />
           </Field>
+          <div className="row">
+            <button className="btn btn--sm" onClick={() => updateSettings({ onboarding: { done: false } })}>
+              Rever a introdução
+            </button>
+            {settings.onboarding?.checklistHidden && (
+              <button className="btn btn--sm" onClick={() => updateSettings({ onboarding: { done: true } })}>
+                Mostrar os primeiros passos
+              </button>
+            )}
+          </div>
         </Card>
 
         <Card

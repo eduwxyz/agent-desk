@@ -7,10 +7,12 @@ import { MemoryPage } from './components/Memory'
 import { RoutinesPage } from './components/Routines'
 import { SkillsPage } from './components/Skills'
 import { ReportPage } from './components/Report'
+import { Onboarding } from './components/Onboarding'
 
 export function App(): ReactNode {
   const view = useStore((s) => s.view)
   const theme = useStore((s) => s.settings.theme)
+  const intro = useStore((s) => s.ready && s.settings.onboarding?.done === false)
 
   useEffect(() => {
     if (theme === 'system') delete document.documentElement.dataset['theme']
@@ -18,6 +20,7 @@ export function App(): ReactNode {
   }, [theme])
 
   if (!view) return <div className="boot" />
+  if (intro) return <Onboarding />
 
   return (
     <div className="app">

@@ -319,6 +319,22 @@ Um agente com o navegador ligado mexe em páginas como uma pessoa: abre, clica, 
 - **Assumir:** o painel do navegador (aberto pelo cartão "Navegador de X" na mensagem) mostra a tela ao vivo e as últimas ações. "Assumir" mostra a mesma janela pra o usuário entrar numa conta, digitar um código ou passar um captcha; fechar a janela devolve. Enquanto o usuário está com ela, o agente só lê, olha e espera. O prompt pede que, diante de login, senha, código ou captcha, o agente pergunte em vez de tentar. "Apagar logins" na página do agente limpa a sessão.
 - Ligado por agente, desligado por padrão. Desligar fecha a janela e mantém os logins.
 
+### 25. Introdução
+
+Quem abre o app pela primeira vez sai dele com um agente trabalhando, não com uma tela vazia.
+
+- **Instalação nova começa vazia** (sem o time de exemplo) e abre uma introdução em tela cheia, em seis passos:
+  1. boas-vindas, com o nome;
+  2. o motor: confere o Claude Code e o Codex, mostra o comando de instalação ou o botão de entrar, e confere de novo sozinho;
+  3. "sobre você", que vira o contexto do workspace;
+  4. o primeiro agente, a partir de um modelo (Pesquisa, Engenharia, Conteúdo, Assistente ou do zero), com prévia ao vivo;
+  5. o que ele pode usar: web, navegador e computador (nenhum, Linux isolado ou este Mac, com o aviso), e a lembrança de que ações sensíveis sempre pedem aprovação;
+  6. a primeira tarefa, com sugestões que mostram o que foi ligado.
+- No fim, o app cria o canal #geral com o agente, manda a tarefa com @menção e abre o canal com ele trabalhando.
+- Dá pra pular a introdução ou fechá-la.
+- **Primeiros passos:** uma lista na barra lateral com nove recursos (time, conector, memória, rotina, projeto, aprovação, celular…). Cada item se marca sozinho pelo estado do app, e o próximo leva à tela certa. Ela some com "Esconder a lista".
+- Em Configurações: **Rever a introdução** e **Mostrar os primeiros passos**. Uma instalação que já existia não vê nada disso até pedir.
+
 ## Acceptance criteria
 
 1. **Chat básico:** crio um agente no Claude Code, abro DM, mando uma mensagem e vejo a resposta em streaming, com rodapé de modelo/tokens/duração. O mesmo funciona com um agente no Codex.

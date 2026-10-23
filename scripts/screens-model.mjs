@@ -6,7 +6,7 @@ import { join } from 'node:path'
 const out = process.argv[2]
 mkdirSync(out, { recursive: true })
 const data = mkdtempSync(join(tmpdir(), 'agent-desk-'))
-const app = await electron.launch({ args: ['.'], env: { ...process.env, AGENT_DESK_DATA: data } })
+const app = await electron.launch({ args: ['.'], env: { ...process.env, AGENT_DESK_DATA: data, AGENT_DESK_SEED: '1' } })
 const win = await app.firstWindow()
 await win.setViewportSize({ width: 1360, height: 880 })
 await win.waitForSelector('.sidebar')

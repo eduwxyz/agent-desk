@@ -9,6 +9,7 @@ import {
   useStore,
   type View
 } from '../store'
+import { GettingStarted } from './Onboarding'
 import { AgentAvatar, Icon, type IconName } from './ui'
 
 const same = (a: View | null, b: View): boolean => JSON.stringify(a) === JSON.stringify(b)
@@ -135,6 +136,7 @@ export function Sidebar(): ReactNode {
         </div>
       </nav>
 
+      {s.settings.onboarding?.done && !s.settings.onboarding.checklistHidden && <GettingStarted />}
       <div className="sidebar__foot">
         <NavItem view={{ kind: 'usage' }} icon="chart" label="Uso e limites" />
         <NavItem view={{ kind: 'connectors' }} icon="plug" label="Conectores" />
