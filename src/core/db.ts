@@ -212,6 +212,9 @@ const MIGRATIONS = [
   `,
   `
   ALTER TABLE agents ADD COLUMN browser INTEGER NOT NULL DEFAULT 0;
+  `,
+  `
+  ALTER TABLE skills ADD COLUMN source TEXT;
   `
 ]
 
@@ -818,6 +821,7 @@ export class Db {
       replaces: r['replaces'] ? str(r['replaces']) : undefined,
       proposedBy: r['proposed_by'] ? str(r['proposed_by']) : undefined,
       reason: r['reason'] ? str(r['reason']) : undefined,
+      source: r['source'] ? str(r['source']) : undefined,
       createdAt: Number(r['created_at']),
       updatedAt: Number(r['updated_at'])
     }))
@@ -830,11 +834,11 @@ export class Db {
   saveSkill(k: Skill): void {
     this.db
       .prepare(
-        `INSERT INTO skills (id, name, description, body, agents, state, replaces, proposed_by, reason, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `INSERT INTO skills (id, name, description, body, agents, state, replaces, proposed_by, reason, source, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT (id) DO UPDATE SET name = excluded.name, description = excluded.description, body = excluded.body, agents = excluded.agents,
-           state = excluded.state, replaces = excluded.replaces, proposed_by = excluded.proposed_by, reason = excluded.reason, updated_at = excluded.updated_at`
+           state = excluded.state, replaces = excluded.replaces, proposed_by = excluded.proposed_by, reason = excluded.reason, source = excluded.source, updated_at = excluded.updated_at`
       )
-      .run(k.id, k.name, k.description, k.body, JSON.stringify(k.agents), k.state, k.replaces ?? null, k.proposedBy ?? null, k.reason ?? null, k.createdAt, k.updatedAt)
+      .run(k.id, k.name, k.description, k.body, JSON.stringify(k.agents), k.state, k.replaces ?? null, k.proposedBy ?? null, k.reason ?? null, k.source ?? null, k.createdAt, k.updatedAt)
   }
 
   removeSkill(id: string): void {

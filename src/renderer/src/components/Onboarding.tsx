@@ -1,12 +1,21 @@
-// The first-run introduction: who you are, an engine that works, the first
-// agent and what it can use, and its first task, sent from here so the person
-// lands in a channel watching it work. Then "Primeiros passos" in the sidebar
+// The first-run introduction, which is also the setup: an engine that works,
+// the models for routing and memory (required: a company gateway may not have
+// the defaults), who you are, the tools (MCP) and skills to bring in (optional),
+// the first agent and what it can use, and its first task, sent from here so
+// the person lands in a channel watching it work. Then "Primeiros passos" in the sidebar
 // walks through the rest, checking itself off as each feature gets used.
 import { useCallback, useEffect, useState, type ReactNode } from 'react'
 import {
   ENGINES,
   MODELS,
+  addConnector,
+  authorizeConnector,
+  customModel,
   getState,
+  linkSkill,
+  localSkills,
+  modelInfo,
+  usable,
   navigate,
   newChannel,
   refreshEngines,
@@ -19,10 +28,12 @@ import {
   type Agent,
   type AgentColor,
   type EngineId,
+  type GrantLevel,
+  type LocalSkill,
   type State,
   type View
 } from '../store'
-import { Toggle } from './Pages'
+import { ModelSelect, Toggle } from './Pages'
 import { Splash } from './Splash'
 import { AgentAvatar, Icon, MeAvatar, type IconName } from './ui'
 
@@ -115,7 +126,7 @@ const INSTALL: Record<EngineId, { cmd: string; site: string }> = {
   codex: { cmd: 'npm install -g @openai/codex', site: 'https://github.com/openai/codex' }
 }
 
-const STEPS = ['welcome', 'engine', 'you', 'agent', 'powers', 'first'] as const
+const STEPS = ['welcome', 'engine', 'models', 'you', 'tools', 'skills', 'agent', 'powers', 'first'] as const
 type Step = (typeof STEPS)[number]
 
 const slug = (name: string): string =>
@@ -144,6 +155,7 @@ export function Onboarding(): ReactNode {
   const handles = useStore((s) => s.agents.map((a) => a.handle))
   const channels = useStore((s) => s.conversations.filter((c) => c.kind === 'channel').map((c) => c.name))
   const hasAgents = useStore((s) => s.agents.some((a) => !a.archived))
+  const connectors = useStore((s) => s.connectors)
 
   const [step, setStep] = useState<Step>('welcome')
   const [name, setName] = useState(settings.workspaceName)
@@ -153,6 +165,11 @@ export function Onboarding(): ReactNode {
   const [computer, setComputer] = useState<Computer>('none')
   const [task, setTask] = useState(TEMPLATES[0]!.tasks[0]!)
   const [busy, setBusy] = useState(false)
+  // A new install picks both models; seeing the introduction again starts from what's set.
+  const [routerModel, setRouterModel] = useState(hasAgents ? settings.routerModel : '')
+  const [memoryModel, setMemoryModel] = useState(hasAgents ? settings.memoryModel : '')
+  const [skills, setSkills] = useState<string[]>([])
+  const [grants, setGrants] = useState<Record<string, GrantLevel>>({})
   const [opening, setOpening] = useState(true)
   const opened = useCallback(() => setOpening(false), [])
 
@@ -188,10 +205,11 @@ export function Onboarding(): ReactNode {
     if (busy) return
     setBusy(true)
     try {
-      const a: Agent = { ...agent, name: agent.name.trim(), role: agent.role.trim(), handle, computer: computer !== 'none', computerKind: computer === 'mac' ? 'mac' : 'linux' }
+      const a: Agent = { ...agent, name: agent.name.trim(), role: agent.role.trim(), handle, computer: computer !== 'none', computerKind: computer === 'mac' ? 'mac' : 'linux', grants: Object.fromEntries(connectors.map((c) => [c.id, grants[c.id] ?? 'read'])) }
       const channelId = await newChannel(unique('geral', channels))
       await saveAgent(a, [channelId])
-      updateSettings({ workspaceName: name.trim() || settings.workspaceName, context: context.trim(), onboarding: { done: true } })
+      await Promise.all(skills.map((source) => linkSkill(source).catch(() => undefined))) // for every agent; who uses each changes in Skills
+      updateSettings({ workspaceName: name.trim() || settings.workspaceName, context: context.trim(), routerModel, memoryModel, onboarding: { done: true } })
       navigate({ kind: 'conversation', id: channelId })
       sendMessage(channelId, `@${a.handle} ${task.trim()}`)
     } finally {
@@ -219,11 +237,14 @@ export function Onboarding(): ReactNode {
         <div className="onb__stage" key={step}>
           {step === 'welcome' && <Welcome name={name} setName={setName} onNext={next} />}
           {step === 'engine' && <Engines ready={ready.length > 0} onBack={back} onNext={next} />}
+          {step === 'models' && <Models ready={ready} router={routerModel} setRouter={setRouterModel} memory={memoryModel} setMemory={setMemoryModel} onBack={back} onNext={next} />}
           {step === 'you' && <You name={name} context={context} setContext={setContext} onBack={back} onNext={next} />}
+          {step === 'tools' && <Tools onBack={back} onNext={next} />}
+          {step === 'skills' && <SkillsStep picked={skills} setPicked={setSkills} onBack={back} onNext={next} />}
           {step === 'agent' && (
-            <MakeAgent agent={agent} handle={handle} template={template} pick={pick} patch={patch} models={models} computer={computer} onBack={back} onNext={next} />
+            <MakeAgent agent={agent} handle={handle} template={template} pick={pick} patch={patch} models={models} ready={ready} computer={computer} onBack={back} onNext={next} />
           )}
-          {step === 'powers' && <Powers agent={agent} handle={handle} patch={patch} computer={computer} setComputer={setComputer} onBack={back} onNext={next} />}
+          {step === 'powers' && <Powers agent={agent} handle={handle} patch={patch} computer={computer} setComputer={setComputer} grants={grants} setGrants={setGrants} onBack={back} onNext={next} />}
           {step === 'first' && <FirstTask agent={agent} handle={handle} computer={computer} channel={unique('geral', channels)} tasks={tasks} task={task} setTask={setTask} busy={busy} onBack={back} onFinish={() => void finish()} />}
         </div>
       </div>
@@ -414,6 +435,185 @@ function Copy({ text }: { text: string }): ReactNode {
   )
 }
 
+// ---------- 2. the models ----------
+
+function Models(p: { ready: EngineId[]; router: string; setRouter: (v: string) => void; memory: string; setMemory: (v: string) => void; onBack: () => void; onNext: () => void }): ReactNode {
+  const engines = useStore((s) => s.settings.engines)
+  const gateway = p.ready.some((e) => engines[e].account?.startsWith('Gateway'))
+  const ok = (v: string): boolean => !!usable(modelInfo(v))
+  return (
+    <section className="onb__main onb__main--wide">
+      <span className="onb__kicker">Passo 2 · Os modelos</span>
+      <h1>Quem decide e quem lembra.</h1>
+      <p className="onb__lead">Dois trabalhos pequenos rodam o tempo todo, fora dos agentes. Escolha um modelo rápido pra cada um; dá pra trocar depois em Configurações.</p>
+      {gateway && (
+        <p className="onb-note">
+          <Icon name="zap" size={14} /> Você usa o gateway da sua empresa: escolha <b>Outro modelo…</b> e digite o nome que o gateway dá ao modelo.
+        </p>
+      )}
+      <div className="onb-pair">
+        <div className="onb-pick">
+          <span className="onb-pick__icon">
+            <Icon name="spark" size={18} />
+          </span>
+          <strong>Quem responde</strong>
+          <p>Lê a mensagem num canal sem @menção e escolhe o agente. Roda antes de cada resposta: prefira o mais rápido.</p>
+          <ModelSelect value={p.router} onChange={p.setRouter} engines={p.ready} />
+        </div>
+        <div className="onb-pick">
+          <span className="onb-pick__icon">
+            <Icon name="book" size={18} />
+          </span>
+          <strong>Memória</strong>
+          <p>Resume o que sai da janela das conversas longas e sugere o que vale lembrar sobre você.</p>
+          <ModelSelect value={p.memory} onChange={p.setMemory} engines={p.ready} />
+        </div>
+      </div>
+      <Nav onBack={p.onBack} onNext={p.onNext} disabled={!ok(p.router) || !ok(p.memory)} />
+    </section>
+  )
+}
+
+// ---------- 4. the tools ----------
+
+const SUGGESTED: { name: string; url: string; auth: 'oauth' | 'token' }[] = [
+  { name: 'Linear', url: 'https://mcp.linear.app/mcp', auth: 'oauth' },
+  { name: 'Notion', url: 'https://mcp.notion.com/mcp', auth: 'oauth' },
+  { name: 'Sentry', url: 'https://mcp.sentry.dev/mcp', auth: 'oauth' },
+  { name: 'GitHub', url: 'https://api.githubcopilot.com/mcp/', auth: 'token' }
+]
+
+const STATUS: Record<string, { label: string; tone: string }> = {
+  connected: { label: 'conectado', tone: 'tag--ok' },
+  connecting: { label: 'conectando…', tone: '' },
+  needs_auth: { label: 'precisa autorizar', tone: 'tag--warn' },
+  error: { label: 'erro', tone: 'tag--danger' },
+  disconnected: { label: 'desconectado', tone: 'tag--warn' }
+}
+
+function Tools({ onBack, onNext }: { onBack: () => void; onNext: () => void }): ReactNode {
+  const connectors = useStore((s) => s.connectors)
+  const [form, setForm] = useState({ name: '', url: '', auth: 'oauth' as 'oauth' | 'token' | 'none', token: '' })
+  const [error, setError] = useState<string | null>(null)
+  const [adding, setAdding] = useState(false)
+  const add = (): void => {
+    setError(null)
+    setAdding(true)
+    addConnector({ name: form.name.trim(), kind: 'remote', url: form.url.trim(), auth: form.auth, token: form.auth === 'token' ? form.token.trim() : undefined })
+      .then(() => setForm({ name: '', url: '', auth: 'oauth', token: '' }))
+      .catch((e: unknown) => setError(e instanceof Error ? e.message.replace(/^Error invoking.*?: /, '') : String(e)))
+      .finally(() => setAdding(false))
+  }
+  return (
+    <section className="onb__main onb__main--wide">
+      <span className="onb__kicker">Passo 4 · Ferramentas · opcional</span>
+      <h1>As ferramentas do seu trabalho.</h1>
+      <p className="onb__lead">Jira, GitLab, Slack, Linear… qualquer servidor MCP, inclusive os internos da sua empresa. Mais adiante você escolhe o que cada agente pode usar.</p>
+
+      {connectors.length > 0 && (
+        <div className="onb-conns">
+          {connectors.map((c) => {
+            const st = STATUS[c.status] ?? { label: c.status, tone: '' }
+            return (
+              <div key={c.id} className="onb-conn">
+                <Icon name={c.kind === 'stdio' ? 'terminal' : 'plug'} size={16} />
+                <strong>{c.name}</strong>
+                <span className={`tag ${st.tone}`}>{st.label}</span>
+                <span className="muted small grow">{c.tools.length ? `${c.tools.length} ferramentas` : c.error ?? ''}</span>
+                {c.status === 'needs_auth' && (
+                  <button className="btn btn--primary btn--sm" onClick={() => authorizeConnector(c.id)}>
+                    Autorizar no navegador
+                  </button>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      )}
+
+      <div className="onb-add">
+        <div className="onb__chips">
+          {SUGGESTED.filter((x) => !connectors.some((c) => c.url === x.url)).map((x) => (
+            <button key={x.name} className="onb-chip" onClick={() => setForm({ name: x.name, url: x.url, auth: x.auth, token: '' })}>
+              <Icon name="plus" size={12} /> {x.name}
+            </button>
+          ))}
+        </div>
+        <div className="onb__row">
+          <label className="onb__field onb__field--narrow">
+            <span>Nome</span>
+            <input value={form.name} placeholder="Ex.: Jira" onChange={(e) => setForm({ ...form, name: e.target.value })} />
+          </label>
+          <label className="onb__field">
+            <span>Endereço do servidor MCP</span>
+            <input value={form.url} placeholder="https://mcp.suaempresa.com/jira" spellCheck={false} onChange={(e) => setForm({ ...form, url: e.target.value })} />
+          </label>
+        </div>
+        <div className="onb__row onb__row--center">
+          <div className="segmented">
+            {(
+              [
+                ['oauth', 'Login no navegador'],
+                ['token', 'Token'],
+                ['none', 'Sem login']
+              ] as const
+            ).map(([v, label]) => (
+              <button key={v} className={form.auth === v ? 'is-active' : ''} onClick={() => setForm({ ...form, auth: v })}>
+                {label}
+              </button>
+            ))}
+          </div>
+          {form.auth === 'token' && <input className="grow" type="password" value={form.token} placeholder="O token (vai como Authorization: Bearer)" onChange={(e) => setForm({ ...form, token: e.target.value })} />}
+          <button className="btn btn--primary" disabled={adding || !form.name.trim() || !/^https?:\/\//.test(form.url.trim()) || (form.auth === 'token' && !form.token.trim())} onClick={add}>
+            Conectar
+          </button>
+        </div>
+        {error && <p className="field__error">{error}</p>}
+        <p className="hint">O token fica criptografado nas Chaves do Mac. Os agentes nunca veem nem o token nem a sua senha.</p>
+      </div>
+      <Nav onBack={onBack} onNext={onNext} next={connectors.length ? 'Continuar' : 'Conectar depois'} />
+    </section>
+  )
+}
+
+// ---------- 5. the skills ----------
+
+function SkillsStep({ picked, setPicked, onBack, onNext }: { picked: string[]; setPicked: (v: string[]) => void; onBack: () => void; onNext: () => void }): ReactNode {
+  const [found, setFound] = useState<LocalSkill[] | null>(null)
+  useEffect(() => {
+    void localSkills().then(setFound, () => setFound([]))
+  }, [])
+  const toggle = (src: string): void => setPicked(picked.includes(src) ? picked.filter((x) => x !== src) : [...picked, src])
+  return (
+    <section className="onb__main onb__main--wide">
+      <span className="onb__kicker">Passo 5 · Skills · opcional</span>
+      <h1>Traga as suas skills.</h1>
+      <p className="onb__lead">As receitas que você já usa no Claude Code e no Codex. Os agentes leem direto do arquivo: o que você mudar lá vale aqui. O resto da sua configuração (hooks, plugins, permissões) continua de fora.</p>
+      {found === null ? (
+        <p className="onb__wait">
+          <span className="pulse" /> Procurando…
+        </p>
+      ) : found.length === 0 ? (
+        <p className="onb-note">Não achei skills no seu Claude Code nem no Codex. Dá pra escrever as suas depois, em Skills.</p>
+      ) : (
+        <div className="onb-skills">
+          {found.map((k) => (
+            <button key={k.source} className={`onb-skill ${picked.includes(k.source) ? 'is-active' : ''}`} onClick={() => toggle(k.source)}>
+              <span className="onb-skill__check">{picked.includes(k.source) && <Icon name="check" size={12} />}</span>
+              <span className="grow">
+                <strong>{k.name}</strong> <span className="tag">{k.origin}</span>
+                <span className="onb-skill__desc">{k.description}</span>
+                {k.scripts && <span className="small warn-text">Tem scripts: precisa de um agente com computador.</span>}
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
+      <Nav onBack={onBack} onNext={onNext} next={picked.length ? `Trazer ${picked.length} ${picked.length === 1 ? 'skill' : 'skills'}` : 'Pular'} />
+    </section>
+  )
+}
+
 // ---------- 3. you ----------
 
 const ABOUT_EXAMPLES = ['Sou dev e trabalho com…', 'Tenho uma loja online de…', 'Estudo para…', 'Prefiro respostas curtas e diretas.']
@@ -421,7 +621,7 @@ const ABOUT_EXAMPLES = ['Sou dev e trabalho com…', 'Tenho uma loja online de�
 function You({ name, context, setContext, onBack, onNext }: { name: string; context: string; setContext: (v: string) => void; onBack: () => void; onNext: () => void }): ReactNode {
   return (
     <section className="onb__main">
-      <span className="onb__kicker">Passo 2 · Você</span>
+      <span className="onb__kicker">Passo 3 · Você</span>
       <h1>{name.trim() ? `${name.trim().split(' ')[0]}, conta um pouco sobre você.` : 'Conta um pouco sobre você.'}</h1>
       <p className="onb__lead">Todo agente lê isso antes de cada resposta, então ninguém precisa te perguntar de novo. Seu trabalho, seus projetos, como você gosta das respostas.</p>
       <textarea
@@ -454,15 +654,17 @@ function MakeAgent(p: {
   pick: (t: Template) => void
   patch: (a: Partial<Agent>) => void
   models: typeof MODELS
+  ready: EngineId[]
   computer: Computer
   onBack: () => void
   onNext: () => void
 }): ReactNode {
   const { agent, patch } = p
+  const custom = !MODELS.some((m) => m.id === agent.modelId) ? modelInfo(agent.modelId) : undefined
   return (
     <div className="onb__split">
       <section className="onb__main">
-        <span className="onb__kicker">Passo 3 · Seu primeiro agente</span>
+        <span className="onb__kicker">Passo 6 · Seu primeiro agente</span>
         <h1>Quem vai trabalhar com você?</h1>
         <p className="onb__lead">Comece por um modelo e ajuste o que quiser. Depois você monta o resto do time.</p>
         <div className="onb-templates">
@@ -503,13 +705,31 @@ function MakeAgent(p: {
                 <span>{m.hint}</span>
               </button>
             ))}
+            <button className={`onb-model ${custom ? 'is-active' : ''}`} onClick={() => !custom && patch({ modelId: customModel(p.ready[0] ?? 'claude', '') })}>
+              <strong>Outro modelo</strong>
+              <span>O nome do gateway</span>
+            </button>
           </div>
+          {custom && (
+            <div className="onb__row onb-custom">
+              {p.ready.length > 1 && (
+                <select value={custom.engine} onChange={(e) => patch({ modelId: customModel(e.target.value as EngineId, custom.id) })}>
+                  {p.ready.map((e) => (
+                    <option key={e} value={e}>
+                      {ENGINES[e].label}
+                    </option>
+                  ))}
+                </select>
+              )}
+              <input autoFocus className="model-name" value={custom.id} placeholder="O nome exato que o gateway da sua empresa usa" spellCheck={false} onChange={(e) => patch({ modelId: customModel(custom.engine, e.target.value) })} />
+            </div>
+          )}
         </div>
         <label className="onb__field">
           <span>O que ele faz</span>
           <textarea rows={4} value={agent.instructions} placeholder="Escreva como explicaria pra um colega novo: o que fazer, o que evitar, quando perguntar." onChange={(e) => patch({ instructions: e.target.value })} />
         </label>
-        <Nav onBack={p.onBack} onNext={p.onNext} disabled={!agent.name.trim()} />
+        <Nav onBack={p.onBack} onNext={p.onNext} disabled={!agent.name.trim() || !usable(modelInfo(agent.modelId))} />
       </section>
       <aside className="onb__aside">
         <AgentCard agent={agent} handle={p.handle} computer={p.computer} />
@@ -519,7 +739,7 @@ function MakeAgent(p: {
 }
 
 function AgentCard({ agent, handle, computer }: { agent: Agent; handle: string; computer: Computer }): ReactNode {
-  const model = MODELS.find((m) => m.id === agent.modelId)
+  const model = modelInfo(agent.modelId)
   const name = agent.name.trim() || 'Seu agente'
   const first = agent.instructions.trim().split(/(?<=\.)\s/)[0]
   return (
@@ -566,15 +786,18 @@ function Powers(p: {
   patch: (a: Partial<Agent>) => void
   computer: Computer
   setComputer: (c: Computer) => void
+  grants: Record<string, GrantLevel>
+  setGrants: (g: Record<string, GrantLevel>) => void
   onBack: () => void
   onNext: () => void
 }): ReactNode {
   const { agent, patch, computer } = p
   const name = agent.name.trim() || 'Ele'
+  const connectors = useStore((s) => s.connectors)
   return (
     <div className="onb__split">
       <section className="onb__main">
-        <span className="onb__kicker">Passo 4 · O que {name} pode usar</span>
+        <span className="onb__kicker">Passo 7 · O que {name} pode usar</span>
         <h1>Dê ferramentas, não chaves.</h1>
         <p className="onb__lead">Ligue só o que a função pede. Tudo isso muda depois na página do agente, e cada ação aparece na conversa.</p>
         <div className="onb-powers">
@@ -628,6 +851,37 @@ function Powers(p: {
             </div>
           </div>
         </div>
+        {connectors.length > 0 && (
+          <div className="onb-powers onb-powers--tools">
+            {connectors.map((c) => {
+              const level = p.grants[c.id] ?? 'read' // reading is safe to start with
+              return (
+                <div key={c.id} className="onb-power-row">
+                  <span className="onb-power-row__icon">
+                    <Icon name={c.kind === 'stdio' ? 'terminal' : 'plug'} size={18} />
+                  </span>
+                  <div>
+                    <strong>{c.name}</strong>
+                    <p>{c.tools.length ? `${c.tools.length} ferramentas` : 'conectando…'}</p>
+                  </div>
+                  <div className="segmented">
+                    {(
+                      [
+                        ['none', 'Sem acesso'],
+                        ['read', 'Ler'],
+                        ['read_write', 'Ler e escrever']
+                      ] as const
+                    ).map(([v, label]) => (
+                      <button key={v} className={level === v ? 'is-active' : ''} onClick={() => p.setGrants({ ...p.grants, [c.id]: v })}>
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        )}
         <div className="onb-guard">
           <Icon name="shield" size={16} />
           <p>
@@ -661,7 +915,7 @@ function FirstTask(p: {
   return (
     <div className="onb__split">
       <section className="onb__main">
-        <span className="onb__kicker">Passo 5 · Mão na massa</span>
+        <span className="onb__kicker">Passo 8 · Mão na massa</span>
         <h1>O que {name} faz primeiro?</h1>
         <p className="onb__lead">
           Vou criar o canal <b>#{p.channel}</b> com {name} e mandar o pedido. Você acompanha cada passo enquanto {name} trabalha.

@@ -3447,3 +3447,157 @@ table.csv th {
   margin-top: 8px;
   font-family: var(--mono);
 }
+.skill__desc {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* introduction: the setup steps */
+.onb-note {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: var(--accent-soft);
+  color: var(--text);
+  font-size: 13.5px;
+  margin: 0 0 18px;
+}
+.onb-note .icon {
+  color: var(--accent);
+  flex: none;
+}
+.onb-pair {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+.onb-pick {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 18px;
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+}
+.onb-pick strong {
+  font-size: 15px;
+}
+.onb-pick p {
+  margin: 0 0 6px;
+  color: var(--text-2);
+  font-size: 13px;
+  flex: 1;
+}
+.onb-pick__icon {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 9px;
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.onb-conns {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--panel);
+  margin-bottom: 16px;
+}
+.onb-conn {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border);
+}
+.onb-conn:last-child {
+  border-bottom: 0;
+}
+.onb-add {
+  padding: 18px;
+  border-radius: 14px;
+  border: 1px dashed var(--border-strong);
+  background: var(--panel);
+}
+.onb-add .onb__field {
+  margin-bottom: 12px;
+}
+.onb__field--narrow {
+  flex: 0 0 200px;
+}
+.onb__row--center {
+  align-items: center;
+  margin-bottom: 4px;
+}
+.onb-add .hint {
+  margin: 10px 0 0;
+}
+.onb-skills {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+.onb-skill {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  text-align: left;
+  padding: 14px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+}
+.onb-skill.is-active {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.onb-skill strong {
+  font-size: 14px;
+}
+.onb-skill__check {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  margin-top: 1px;
+  border-radius: 6px;
+  border: 1.5px solid var(--border-strong);
+  color: #fff;
+}
+.onb-skill.is-active .onb-skill__check {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.onb-skill__desc {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  margin-top: 4px;
+  font-size: 12.5px;
+  color: var(--text-2);
+}
+.onb-skill .warn-text {
+  display: block;
+  margin-top: 4px;
+}
+.onb-custom {
+  margin-top: 10px;
+}
+.onb-custom select {
+  flex: 0 0 160px;
+}
+.onb-powers--tools {
+  margin-top: 14px;
+}
+.onb-powers--tools .segmented {
+  flex: none;
+}

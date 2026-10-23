@@ -31,6 +31,7 @@ import { checkFolder, Computers, folderName, type Shooter } from './computer'
 import { Memories } from './memory'
 import { cleanFiles, defaultFiles, projectFolders } from './projects'
 import { loginEnv } from './mac'
+import { findLocalSkills } from './local-skills'
 import { Routines } from './routines'
 import { Runner } from './runs'
 import { seed } from './seed'
@@ -407,6 +408,11 @@ const api: Api = {
   },
 
   saveSkill: ({ skill }) => skills.save(skill),
+  localSkills: () => findLocalSkills(),
+  linkSkill: ({ source, agents }) => {
+    if (!findLocalSkills().some((k) => k.source === source)) throw new Error('Essa skill não está mais no seu Claude Code nem no Codex.')
+    return skills.link(source, agents)
+  },
   decideSkill: ({ id, approve }) => void skills.decide(id, approve),
   restoreSkill: ({ skillId, versionId }) => void skills.restore(skillId, versionId),
   archiveSkill: ({ id, archived }) => void skills.archive(id, archived),

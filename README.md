@@ -16,7 +16,7 @@
 - **Computador do agente:** um Linux isolado (Docker) onde ele instala, roda e testa; ou, por escolha sua, o seu próprio Mac.
 - **Navegador do agente:** um Chrome só dele, que você acompanha ao vivo e assume quando precisa entrar numa conta.
 - **Projetos:** um canal ligado a uma pasta do Mac; todo agente do canal recebe o `CLAUDE.md`/`AGENTS.md` e a memória do projeto.
-- **Memória** que você vê, aprova, edita e esquece. **Rotinas** em dia e hora marcados ou quando aparece algo novo num conector. **Skills** (receitas) que os agentes seguem e propõem.
+- **Memória** que você vê, aprova, edita e esquece. **Rotinas** em dia e hora marcados ou quando aparece algo novo num conector. **Skills** (receitas) que os agentes seguem e propõem, inclusive as que você já tem no Claude Code e no Codex.
 - **Limites por agente**, teto por resposta, "Pausar tudo", boletim com o custo de cada issue e aprovações pelo **Telegram**.
 - Funciona com o **gateway de IA da sua empresa** (proxy), se o seu Claude Code ou Codex já usa um.
 
@@ -71,14 +71,17 @@ Só na primeira vez; depois ele abre normalmente.
 
 ### Passo 3 · A primeira abertura
 
-O app abre com uma introdução de 6 passos:
+O app abre com uma introdução que também é a configuração:
 
 1. **Seu nome.**
 2. **O motor:** o app confere se o Claude Code e o Codex estão prontos. Se faltar algo, mostra o comando ou o botão **Entrar** (no Codex, abre o Terminal pra você fazer o login) e confere de novo sozinho.
-3. **Sobre você:** o que todo agente deve saber (seu trabalho, como gosta das respostas).
-4. **O primeiro agente:** a partir de um modelo (Pesquisa, Engenharia, Conteúdo, Assistente ou do zero).
-5. **O que ele pode usar:** web, navegador e computador.
-6. **A primeira tarefa:** o app cria o canal #geral e você já vê o agente trabalhando.
+3. **Os modelos (obrigatório):** qual modelo decide quem responde nos canais e qual cuida da memória. Se você usa o gateway da empresa, escolha **Outro modelo…** e digite o nome que o gateway usa.
+4. **Sobre você:** o que todo agente deve saber (seu trabalho, como gosta das respostas).
+5. **Ferramentas (opcional):** conecte servidores MCP (Jira, GitLab, Slack, Linear, os internos da sua empresa…) com login no navegador ou token. Dá pra pular e conectar depois.
+6. **Skills (opcional):** traga as skills que você já usa no Claude Code (inclusive as dos plugins) e no Codex. Elas são lidas direto do arquivo; hooks, plugins e permissões continuam de fora.
+7. **O primeiro agente:** a partir de um modelo (Pesquisa, Engenharia, Conteúdo, Assistente ou do zero), com qualquer modelo, inclusive os do gateway.
+8. **O que ele pode usar:** web, navegador, computador e o acesso a cada ferramenta conectada (sem acesso, ler, ou ler e escrever).
+9. **A primeira tarefa:** o app cria o canal #geral e você já vê o agente trabalhando.
 
 ![Criando o primeiro agente, com prévia ao vivo](docs/images/primeiro-agente.png)
 
@@ -99,7 +102,7 @@ Se no trabalho o seu Claude Code ou Codex manda os pedidos por um proxy da empre
 - **Claude Code:** o app lê do seu `~/.claude/settings.json` só o bloco `env` (por exemplo `ANTHROPIC_BASE_URL` e o token) e o `apiKeyHelper`. Hooks, plugins e permissões continuam de fora.
 - **Codex:** o app lê do seu `~/.codex/config.toml` o `model_provider` e a tabela `[model_providers.*]`, e pega do seu shell a variável com a chave (o `env_key`).
 
-Em **Configurações**, o motor aparece como "Gateway …". Se o gateway dá nomes próprios aos modelos, escolha **Outro modelo** na página do agente e digite o nome exato.
+Em **Configurações**, o motor aparece como "Gateway …". Se o gateway dá nomes próprios aos modelos, escolha **Outro modelo** e digite o nome exato: na página de cada agente, e em Configurações, no **Router** e na **Memória**.
 
 ## Atualizar
 

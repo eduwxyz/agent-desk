@@ -14,6 +14,7 @@ import {
   type ConnectorTool,
   type Conversation,
   type GrantLevel,
+  type LocalSkill,
   type Memory,
   type MemoryScope,
   type Message,
@@ -361,6 +362,8 @@ export const openExternal = (url: string): void => void call('openExternal', { u
 export const saveRoutine = (routine: RoutineInput): Promise<Routine> => call('saveRoutine', { routine })
 export const setJevKey = (key: string | null): Promise<void> => call('setJevKey', { key })
 export const saveSkill = (skill: SkillInput): Promise<Skill> => call('saveSkill', { skill })
+export const localSkills = (): Promise<LocalSkill[]> => call('localSkills')
+export const linkSkill = (source: string, agents: string[] = []): Promise<Skill> => call('linkSkill', { source, agents })
 export const decideSkill = (id: string, approve: boolean): void => void call('decideSkill', { id, approve })
 export const restoreSkill = (skillId: string, versionId: number): void => void call('restoreSkill', { skillId, versionId })
 export const archiveSkill = (id: string, archived: boolean): void => void call('archiveSkill', { id, archived })

@@ -1199,9 +1199,10 @@ function AddConnector({ onDone }: { onDone: (id?: string) => void }): ReactNode 
 }
 
 // A model from the list, or any name a company gateway gives one ("Outro modelo"), kept as "<engine>:<name>".
-function ModelSelect({ value, onChange, jev }: { value: string; onChange: (v: string) => void; jev?: boolean }): ReactNode {
-  const models = useStore((s) => s.models)
-  const listed = value === 'jev' || models.some((m) => m.id === value)
+// With an empty value it asks for a choice (the introduction makes the person pick).
+export function ModelSelect({ value, onChange, jev, engines }: { value: string; onChange: (v: string) => void; jev?: boolean; engines?: EngineId[] }): ReactNode {
+  const models = useStore((s) => s.models.filter((m) => !engines || engines.includes(m.engine)))
+  const listed = value === '' || value === 'jev' || models.some((m) => m.id === value)
   const custom = listed ? undefined : modelInfo(value)
   return (
     <>
@@ -1212,13 +1213,18 @@ function ModelSelect({ value, onChange, jev }: { value: string; onChange: (v: st
           onChange(v.startsWith('custom:') ? customModel(v.slice(7) as EngineId, custom?.id ?? '') : v)
         }}
       >
+        {value === '' && (
+          <option value="" disabled>
+            Escolha um modelo…
+          </option>
+        )}
         {models.map((m) => (
           <option key={m.id} value={m.id}>
             {ENGINES[m.engine].label} · {m.label}
           </option>
         ))}
         {jev && <option value="jev">TypeSafe · Jev (chave própria)</option>}
-        {(Object.keys(ENGINES) as EngineId[]).map((e) => (
+        {(engines ?? (Object.keys(ENGINES) as EngineId[])).map((e) => (
           <option key={e} value={`custom:${e}`}>
             {ENGINES[e].label} · Outro modelo…
           </option>

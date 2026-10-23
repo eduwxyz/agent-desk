@@ -1,5 +1,5 @@
 // The contract between the renderer and the core, carried over a MessagePort.
-import type { Agent, Approval, Artifact, BrowserView, ComputerInfo, Connector, ConnectorInput, ConnectorTool, Conversation, EngineId, Memory, MemoryScope, Message, Project, Routine, RoutineInput, Report, Settings, Skill, SkillInput, SkillVersion, Trigger } from './types'
+import type { Agent, Approval, Artifact, BrowserView, ComputerInfo, Connector, ConnectorInput, ConnectorTool, Conversation, EngineId, Memory, MemoryScope, Message, Project, Routine, RoutineInput, Report, Settings, LocalSkill, Skill, SkillInput, SkillVersion, Trigger } from './types'
 
 export interface Snapshot {
   settings: Settings
@@ -55,6 +55,8 @@ export interface Api {
   saveRoutine(p: { routine: RoutineInput }): Routine // throws a message for the form
   setJevKey(p: { key: string | null }): Promise<void> // checks the key with TypeSafe; throws why it's refused
   saveSkill(p: { skill: SkillInput }): Skill // throws a message for the form
+  localSkills(): LocalSkill[] // the skills of the user's Claude Code, its plugins and Codex
+  linkSkill(p: { source: string; agents: string[] }): Skill
   decideSkill(p: { id: string; approve: boolean }): void
   restoreSkill(p: { skillId: string; versionId: number }): void
   archiveSkill(p: { id: string; archived: boolean }): void

@@ -499,8 +499,19 @@ export interface Skill {
   replaces?: string // a pending change to this active skill
   proposedBy?: string // the agent that proposed it (pending)
   reason?: string // why, in the agent's words
+  source?: string // linked to a SKILL.md of the user's Claude Code or Codex: read from there, not edited here
   createdAt: number
   updatedAt: number
+}
+
+// A skill already on this Mac (Claude Code, its plugins, Codex), that can be linked.
+export interface LocalSkill {
+  source: string // the SKILL.md
+  name: string
+  description: string
+  origin: string // "Claude Code", "Plugin <name>", "Codex"
+  files: string[] // its other text files, relative to its folder
+  scripts: boolean // it has scripts: an agent needs a computer to run them
 }
 
 export interface SkillVersion {
@@ -513,7 +524,7 @@ export interface SkillVersion {
   at: number
 }
 
-export type SkillInput = Pick<Skill, 'name' | 'description' | 'body' | 'agents'> & { id?: string }
+export type SkillInput = Pick<Skill, 'name' | 'description' | 'body' | 'agents'> & { id?: string; source?: string }
 
 export const skillApplies = (s: Skill, agentId: string): boolean => s.state === 'active' && (s.agents.length === 0 || s.agents.includes(agentId))
 

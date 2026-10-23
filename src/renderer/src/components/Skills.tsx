@@ -5,12 +5,15 @@ import {
   agentById,
   archiveSkill,
   decideSkill,
+  linkSkill,
+  localSkills,
   navigate,
   removeSkill,
   restoreSkill,
   saveSkill,
   skillVersions,
   useStore,
+  type LocalSkill,
   type Skill,
   type SkillInput,
   type SkillVersion
@@ -62,11 +65,13 @@ export function SkillsPage(): ReactNode {
           <h3 className="section-title">Em uso</h3>
           <div className="table">
             {active.map((k) => (
-              <SkillRow key={k.id} skill={k} onEdit={() => setDraft({ id: k.id, name: k.name, description: k.description, body: k.body, agents: k.agents })} />
+              <SkillRow key={k.id} skill={k} onEdit={() => setDraft({ id: k.id, name: k.name, description: k.description, body: k.body, agents: k.agents, source: k.source })} />
             ))}
           </div>
         </section>
       )}
+
+      <LocalSkills />
 
       {archived.length > 0 && (
         <section className="memory-section">
@@ -95,6 +100,57 @@ export function SkillsPage(): ReactNode {
   )
 }
 
+// The skills of the user's Claude Code (and its plugins) and Codex, to link.
+function LocalSkills(): ReactNode {
+  const skills = useStore((s) => s.skills)
+  const [found, setFound] = useState<LocalSkill[] | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  useEffect(() => {
+    void localSkills().then(setFound, () => setFound([]))
+  }, [])
+  if (!found || found.length === 0) return null
+  return (
+    <section className="memory-section">
+      <h3 className="section-title">Do seu Claude Code e do Codex</h3>
+      <p className="muted small memory-section__lead">
+        As skills que você já usa no terminal. Ligada, a skill fica com os agentes que você escolher e é lida direto do arquivo: o que você mudar nela vale na próxima vez.
+      </p>
+      {error && <p className="note note--error">{error}</p>}
+      <div className="table">
+        {found.map((l) => {
+          const linked = skills.find((k) => k.source === l.source && k.state === 'active')
+          return (
+            <div key={l.source} className="table__row skill">
+              <div className="grow memory__body">
+                <div className="row row--center">
+                  <strong>{l.name}</strong>
+                  <span className="tag">{l.origin}</span>
+                  {l.files.length > 0 && <span className="muted small">+ {l.files.length} {l.files.length === 1 ? 'arquivo' : 'arquivos'} de apoio</span>}
+                </div>
+                <span className="small skill__desc">{l.description}</span>
+                {l.scripts && (
+                  <span className="small warn-text">
+                    <Icon name="terminal" size={12} /> Tem scripts: só roda com um agente que tenha computador (Linux ou este Mac).
+                  </span>
+                )}
+              </div>
+              <div className="memory__actions">
+                {linked ? (
+                  <span className="tag tag--ok">em uso</span>
+                ) : (
+                  <button className="btn btn--sm" onClick={() => linkSkill(l.source).catch((e: unknown) => setError(e instanceof Error ? e.message.replace(/^Error invoking.*?: /, '') : String(e)))}>
+                    Usar
+                  </button>
+                )}
+              </div>
+            </div>
+          )
+        })}
+      </div>
+    </section>
+  )
+}
+
 function Agents({ ids }: { ids: string[] }): ReactNode {
   const agents = useStore((s) => ids.map((id) => agentById(s, id)).filter((a) => !!a))
   if (ids.length === 0) return <span className="muted small">todos os agentes</span>
@@ -117,7 +173,7 @@ function SkillRow({ skill: k, onEdit }: { skill: Skill; onEdit: () => void }): R
         <div className="row row--center">
           <strong>{k.name}</strong>
           <Agents ids={k.agents} />
-          <span className="muted small">· mudou {time(k.updatedAt)}</span>
+          {k.source ? <span className="tag" title={k.source}>do seu {k.source.includes('/.codex/') ? 'Codex' : 'Claude Code'}</span> : <span className="muted small">· mudou {time(k.updatedAt)}</span>}
         </div>
         <span className="small">{k.description}</span>
         {open === 'body' && <pre className="skill__body">{k.body}</pre>}
@@ -127,9 +183,11 @@ function SkillRow({ skill: k, onEdit }: { skill: Skill; onEdit: () => void }): R
         <button className="btn btn--sm btn--ghost" onClick={() => setOpen(open === 'body' ? null : 'body')}>
           {open === 'body' ? 'Fechar' : 'Ver receita'}
         </button>
-        <button className="btn btn--sm btn--ghost" onClick={() => setOpen(open === 'history' ? null : 'history')}>
-          Histórico
-        </button>
+        {!k.source && (
+          <button className="btn btn--sm btn--ghost" onClick={() => setOpen(open === 'history' ? null : 'history')}>
+            Histórico
+          </button>
+        )}
         <button className="icon-btn" title="Editar" onClick={onEdit}>
           <Icon name="edit" size={14} />
         </button>
@@ -256,9 +314,15 @@ function SkillForm({ draft, onChange, onClose }: { draft: SkillInput; onChange: 
             <input value={draft.description} placeholder="Ao rodar ou consertar os testes do Core" onChange={(e) => set({ description: e.target.value })} />
           </Field>
         </div>
-        <Field label="Receita" hint="Os passos, em Markdown: comandos exatos, armadilhas, como conferir.">
-          <textarea rows={10} className="mono" value={draft.body} onChange={(e) => set({ body: e.target.value })} />
-        </Field>
+        {draft.source ? (
+          <p className="hint">
+            Ligada a <span className="mono">{draft.source}</span>: a receita muda lá, e os agentes leem sempre a versão de agora. Aqui você escolhe quem usa.
+          </p>
+        ) : (
+          <Field label="Receita" hint="Os passos, em Markdown: comandos exatos, armadilhas, como conferir.">
+            <textarea rows={10} className="mono" value={draft.body} onChange={(e) => set({ body: e.target.value })} />
+          </Field>
+        )}
         <Field label="Pra quem">
           <div className="row row--center skill__pick">
             <button type="button" className={`chip ${draft.agents.length === 0 ? 'is-on' : ''}`} onClick={() => set({ agents: [] })}>
@@ -278,7 +342,7 @@ function SkillForm({ draft, onChange, onClose }: { draft: SkillInput; onChange: 
             <button className="btn btn--sm btn--ghost" onClick={onClose}>
               Cancelar
             </button>
-            <button className="btn btn--sm btn--primary" disabled={!draft.name.trim() || !draft.description.trim() || !draft.body.trim()} onClick={save}>
+            <button className="btn btn--sm btn--primary" disabled={!draft.source && (!draft.name.trim() || !draft.description.trim() || !draft.body.trim())} onClick={save}>
               {draft.id ? 'Salvar' : 'Criar skill'}
             </button>
           </div>
