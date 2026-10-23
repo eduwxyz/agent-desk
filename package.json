@@ -1,6 +1,6 @@
 {
   "name": "agent-desk",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "private": true,
   "description": "Desktop chat where you work with a team of AI agents, with scopes, approvals and budgets.",
   "license": "Apache-2.0",
