@@ -65,11 +65,12 @@ export interface State {
   skills: Skill[]
   packaged: boolean
   panel: Panel | null // the side panel next to a conversation
-  dialog: Dialog | null // a channel's members, name or topic, or its project panel
+  dialog: Dialog | null // a small window: a channel's members, name, topic or project; archived agents; new channel; search
+  tabs: Record<string, string> // the open tab of each page with tabs, kept while the app is open
   demoServer?: { command: string; args: string[] }
 }
 
-export type Dialog = { kind: 'members' | 'rename' | 'topic' | 'project'; id: string }
+export type Dialog = { kind: 'members' | 'rename' | 'topic' | 'project'; id: string } | { kind: 'archived' | 'new-channel' | 'search' }
 
 export type Panel = { kind: 'artifact'; id: string } | { kind: 'service'; agentId: string; name: string } | { kind: 'browser'; agentId: string }
 
@@ -110,7 +111,8 @@ let state: State = {
   skills: [],
   packaged: false,
   panel: null,
-  dialog: null
+  dialog: null,
+  tabs: {}
 }
 
 // ---------- store plumbing ----------
@@ -343,6 +345,7 @@ export const reconnectConnector = (id: string): void => void call('reconnectConn
 export const authorizeConnector = (id: string): void => void call('authorizeConnector', { id })
 
 export const renameChannel = (id: string, name: string): Promise<void> => call('renameChannel', { id, name })
+export const archiveAgent = (id: string, archived: boolean): Promise<void> => call('archiveAgent', { id, archived })
 export const setTopic = (id: string, topic: string): Promise<void> => call('setTopic', { id, topic })
 export const setChannelMembers = (id: string, agentIds: string[]): Promise<void> => call('setChannelMembers', { id, agentIds })
 export const deleteConversation = (id: string): Promise<void> => call('deleteConversation', { id })
@@ -378,6 +381,7 @@ export function patchAgent(agentId: string, patch: Partial<Agent>): void {
 
 export const openPanel = (panel: Panel | null): void => set((s) => ({ ...s, panel }))
 export const openDialog = (dialog: Dialog | null): void => set((s) => ({ ...s, dialog }))
+export const setTab = (page: string, tab: string): void => set((s) => ({ ...s, tabs: { ...s.tabs, [page]: tab } }))
 export const computerAction = (agentId: string, action: 'start' | 'restart' | 'erase' | 'open_folder' | 'refresh'): void =>
   void call('computerAction', { agentId, action })
 export const stopService = (agentId: string, name: string): void => void call('stopService', { agentId, name })

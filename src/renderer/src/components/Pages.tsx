@@ -38,6 +38,8 @@ import {
   RUN_STALL_MINUTES,
   countedTokens,
   customModel,
+  archiveAgent,
+  setTab,
   MODELS,
   saveSkill,
   skillApplies,
@@ -140,6 +142,11 @@ export function AgentPage({ id }: { id?: string }): ReactNode {
     if (e !== engine) patch({ modelId: work ? customModel(e, custom ? (model?.id ?? '') : '') : models.find((m) => m.engine === e)!.id })
   }
 
+  // A new agent shows everything at once; an existing one, a tab at a time.
+  const tab = useTab('agent', AGENT_TABS)
+  const pane = (t: string): boolean => isNew || tab === t
+  const archived = !!existing?.archived
+
   return (
     <Page
       title={
@@ -150,9 +157,20 @@ export function AgentPage({ id }: { id?: string }): ReactNode {
       }
       actions={
         <>
-          {!isNew && (
+          {!isNew && !archived && (
             <button className="btn btn--ghost" onClick={() => void openDm(draft.id)}>
               Abrir DM
+            </button>
+          )}
+          {!isNew && !archived && (
+            <button
+              className="btn btn--ghost"
+              title="Tira da barra lateral e para de responder; dá pra reativar"
+              onClick={() => {
+                if (confirm(`Arquivar ${draft.name}?\n\nSai da barra lateral e para de responder; as rotinas dele desligam. O histórico e os recibos ficam, e dá pra reativar em "Arquivados", no fim da lista de agentes.`)) void archiveAgent(draft.id, true)
+              }}
+            >
+              Arquivar
             </button>
           )}
           {saved && <span className="saved">Salvo</span>}
@@ -162,208 +180,232 @@ export function AgentPage({ id }: { id?: string }): ReactNode {
         </>
       }
     >
+      {archived && (
+        <div className="archived-banner">
+          <Icon name="layers" size={15} />
+          <span className="grow">
+            <strong>{draft.name} está arquivado.</strong> Não responde, não roda rotinas e não aparece pro router.
+          </span>
+          <button className="btn btn--sm btn--primary" onClick={() => void archiveAgent(draft.id, false)}>
+            Reativar
+          </button>
+        </div>
+      )}
+      {!isNew && <Tabs page="agent" tabs={AGENT_TABS} />}
       <div className="agent-layout">
         <div className="agent-form">
-          <Card title="Identidade" lead="Como você chama e reconhece o agente no chat.">
-            <div className="grid2">
-              <Field label="Nome">
-                <input value={draft.name} placeholder="Ex.: Lia" onChange={(e) => patch({ name: e.target.value })} />
-              </Field>
-              <Field label="@handle" error={draft.handle ? handleError : null}>
-                <input
-                  value={draft.handle}
-                  placeholder="lia"
-                  onChange={(e) => patch({ handle: e.target.value.toLowerCase().replace(/\s/g, '') })}
-                />
-              </Field>
-            </div>
-            <Field label="Papel" hint="Uma linha. O router usa isso pra decidir quem responde.">
-              <input value={draft.role} placeholder="Ex.: Engenharia" onChange={(e) => patch({ role: e.target.value })} />
-            </Field>
-            <Field label="Cor">
-              <div className="swatches">
-                {COLORS.map((c) => (
-                  <button
-                    key={c}
-                    className={`swatch c-${c} ${draft.color === c ? 'is-active' : ''}`}
-                    onClick={() => patch({ color: c })}
-                    aria-label={c}
+          {pane('perfil') && (
+            <Card title="Identidade" lead="Como você chama e reconhece o agente no chat.">
+              <div className="grid2">
+                <Field label="Nome">
+                  <input value={draft.name} placeholder="Ex.: Lia" onChange={(e) => patch({ name: e.target.value })} />
+                </Field>
+                <Field label="@handle" error={draft.handle ? handleError : null}>
+                  <input
+                    value={draft.handle}
+                    placeholder="lia"
+                    onChange={(e) => patch({ handle: e.target.value.toLowerCase().replace(/\s/g, '') })}
                   />
+                </Field>
+              </div>
+              <Field label="Papel" hint="Uma linha. O router usa isso pra decidir quem responde.">
+                <input value={draft.role} placeholder="Ex.: Engenharia" onChange={(e) => patch({ role: e.target.value })} />
+              </Field>
+              <Field label="Cor">
+                <div className="swatches">
+                  {COLORS.map((c) => (
+                    <button
+                      key={c}
+                      className={`swatch c-${c} ${draft.color === c ? 'is-active' : ''}`}
+                      onClick={() => patch({ color: c })}
+                      aria-label={c}
+                    />
+                  ))}
+                </div>
+              </Field>
+            </Card>
+          )}
+
+          {pane('perfil') && (
+            <Card title="Instruções" lead="Escreva como escreveria pra um colega novo: o que fazer, o que evitar, quando perguntar.">
+              <textarea
+                rows={6}
+                value={draft.instructions}
+                placeholder="Ex.: Responde dúvidas no #suporte com base na documentação. Quando não souber, chama alguém."
+                onChange={(e) => patch({ instructions: e.target.value })}
+              />
+              <p className="hint">O contexto do workspace já entra em toda conversa. Aqui vai só o que é deste agente.</p>
+            </Card>
+          )}
+
+          {pane('canais') && (
+            <Card title="Onde participa">
+              <div className="checks">
+                {channels.map((c) => (
+                  <label key={c.id} className="check">
+                    <input
+                      type="checkbox"
+                      checked={chosen.includes(c.id)}
+                      onChange={(e) => {
+                        setChosen(e.target.checked ? [...chosen, c.id] : chosen.filter((x) => x !== c.id))
+                        setSaved(false)
+                      }}
+                    />
+                    <Icon name="hash" size={14} /> {c.name}
+                  </label>
                 ))}
               </div>
-            </Field>
-          </Card>
+              <p className="hint">Fora desses canais, chame com @{draft.handle || 'handle'} ou mande DM.</p>
+            </Card>
+          )}
 
-          <Card title="Instruções" lead="Escreva como escreveria pra um colega novo: o que fazer, o que evitar, quando perguntar.">
-            <textarea
-              rows={6}
-              value={draft.instructions}
-              placeholder="Ex.: Responde dúvidas no #suporte com base na documentação. Quando não souber, chama alguém."
-              onChange={(e) => patch({ instructions: e.target.value })}
-            />
-            <p className="hint">O contexto do workspace já entra em toda conversa. Aqui vai só o que é deste agente.</p>
-          </Card>
+          {!isNew && pane('canais') && <AgentSkills agentId={draft.id} name={draft.name} />}
 
-          <Card title="Onde participa">
-            <div className="checks">
-              {channels.map((c) => (
-                <label key={c.id} className="check">
-                  <input
-                    type="checkbox"
-                    checked={chosen.includes(c.id)}
-                    onChange={(e) => {
-                      setChosen(e.target.checked ? [...chosen, c.id] : chosen.filter((x) => x !== c.id))
-                      setSaved(false)
-                    }}
-                  />
-                  <Icon name="hash" size={14} /> {c.name}
-                </label>
-              ))}
-            </div>
-            <p className="hint">Fora desses canais, chame com @{draft.handle || 'handle'} ou mande DM.</p>
-          </Card>
-
-          {!isNew && <AgentSkills agentId={draft.id} name={draft.name} />}
-
-          <Card
-            title="Ferramentas e acesso"
-            lead={`Um nível por conector. O que fica de fora nem aparece pro modelo.${isNew ? '' : ' Muda na hora, sem precisar salvar.'}`}
-          >
-            {connectors.length === 0 && (
-              <p className="muted small">
-                Nenhum conector ainda.{' '}
-                <button className="link" onClick={() => navigate({ kind: 'connectors' })}>
-                  Adicionar em Conectores
-                </button>
-              </p>
-            )}
-            <div className="grants">
-              {connectors.map((c) => {
-                const level = draft.grants[c.id] ?? 'none'
-                const sensitive = c.tools.filter((t) => t.cls === 'sensitive' && t.enabled)
-                return (
-                  <div key={c.id} className="grant">
-                    <div className="grant__name">
-                      <Icon name={c.kind === 'stdio' ? 'terminal' : 'globe'} />
-                      <div>
-                        <strong>
-                          {c.name} {grantSaved === c.id && <span className="saved">Salvo</span>}
-                        </strong>
-                        <span className="muted small">
-                          {c.status === 'needs_auth' ? (
-                            <>
-                              Precisa autorizar ·{' '}
-                              <button className="link" onClick={() => authorizeConnector(c.id)}>
-                                Autorizar no navegador
-                              </button>
-                            </>
-                          ) : level === 'none'
-                            ? 'Nenhuma ferramenta exposta'
-                            : level === 'read'
-                              ? `${c.tools.filter((t) => t.cls === 'read' && t.enabled).length} ferramentas de leitura`
-                              : `${c.tools.filter((t) => t.enabled).length} ferramentas${sensitive.length ? ` · ${sensitive.length} pedem aprovação` : ''}`}
-                        </span>
+          {pane('ferramentas') && (
+            <Card
+              title="Ferramentas e acesso"
+              lead={`Um nível por conector. O que fica de fora nem aparece pro modelo.${isNew ? '' : ' Muda na hora, sem precisar salvar.'}`}
+            >
+              {connectors.length === 0 && (
+                <p className="muted small">
+                  Nenhum conector ainda.{' '}
+                  <button className="link" onClick={() => navigate({ kind: 'connectors' })}>
+                    Adicionar em Conectores
+                  </button>
+                </p>
+              )}
+              <div className="grants">
+                {connectors.map((c) => {
+                  const level = draft.grants[c.id] ?? 'none'
+                  const sensitive = c.tools.filter((t) => t.cls === 'sensitive' && t.enabled)
+                  return (
+                    <div key={c.id} className="grant">
+                      <div className="grant__name">
+                        <Icon name={c.kind === 'stdio' ? 'terminal' : 'globe'} />
+                        <div>
+                          <strong>
+                            {c.name} {grantSaved === c.id && <span className="saved">Salvo</span>}
+                          </strong>
+                          <span className="muted small">
+                            {c.status === 'needs_auth' ? (
+                              <>
+                                Precisa autorizar ·{' '}
+                                <button className="link" onClick={() => authorizeConnector(c.id)}>
+                                  Autorizar no navegador
+                                </button>
+                              </>
+                            ) : level === 'none'
+                              ? 'Nenhuma ferramenta exposta'
+                              : level === 'read'
+                                ? `${c.tools.filter((t) => t.cls === 'read' && t.enabled).length} ferramentas de leitura`
+                                : `${c.tools.filter((t) => t.enabled).length} ferramentas${sensitive.length ? ` · ${sensitive.length} pedem aprovação` : ''}`}
+                          </span>
+                        </div>
+                      </div>
+                      <div className="segmented">
+                        {LEVELS.map((l) => (
+                          <button
+                            key={l.value}
+                            className={level === l.value ? 'is-active' : ''}
+                            onClick={() => {
+                              // Access changes take effect right away for existing agents; no Save needed.
+                              if (isNew) return patch({ grants: { ...draft.grants, [c.id]: l.value } })
+                              setDraft((d) => ({ ...d, grants: { ...d.grants, [c.id]: l.value } }))
+                              setGrant(draft.id, c.id, l.value)
+                              setGrantSaved(c.id)
+                            }}
+                          >
+                            {l.label}
+                          </button>
+                        ))}
                       </div>
                     </div>
-                    <div className="segmented">
-                      {LEVELS.map((l) => (
-                        <button
-                          key={l.value}
-                          className={level === l.value ? 'is-active' : ''}
-                          onClick={() => {
-                            // Access changes take effect right away for existing agents; no Save needed.
-                            if (isNew) return patch({ grants: { ...draft.grants, [c.id]: l.value } })
-                            setDraft((d) => ({ ...d, grants: { ...d.grants, [c.id]: l.value } }))
-                            setGrant(draft.id, c.id, l.value)
-                            setGrantSaved(c.id)
-                          }}
-                        >
-                          {l.label}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                )
-              })}
-            </div>
-            <p className="hint">
-              <Icon name="shield" size={13} /> Ferramentas sensíveis (merge, deploy, apagar, enviar) viram pedido de aprovação no chat, a não ser as que você marcou como "sempre permitir".
-            </p>
-            {!isNew && (draft.autoApprove?.length ?? 0) > 0 && (
-              <div className="always">
-                <span className="small muted">Sempre permitido, sem pedir:</span>
-                {draft.autoApprove!.map((rule) => {
-                  const [cid, tool] = rule.split(':')
-                  return (
-                    <span key={rule} className="chip is-on always__rule">
-                      {connectors.find((c) => c.id === cid)?.name ?? 'conector'} · {tool}
-                      <button
-                        className="always__x"
-                        title="Voltar a pedir aprovação"
-                        onClick={() => {
-                          const autoApprove = draft.autoApprove!.filter((r) => r !== rule)
-                          setDraft((d) => ({ ...d, autoApprove }))
-                          patchAgent(draft.id, { autoApprove })
-                        }}
-                      >
-                        <Icon name="x" size={11} />
-                      </button>
-                    </span>
                   )
                 })}
               </div>
-            )}
-          </Card>
+              <p className="hint">
+                <Icon name="shield" size={13} /> Ferramentas sensíveis (merge, deploy, apagar, enviar) viram pedido de aprovação no chat, a não ser as que você marcou como "sempre permitir".
+              </p>
+              {!isNew && (draft.autoApprove?.length ?? 0) > 0 && (
+                <div className="always">
+                  <span className="small muted">Sempre permitido, sem pedir:</span>
+                  {draft.autoApprove!.map((rule) => {
+                    const [cid, tool] = rule.split(':')
+                    return (
+                      <span key={rule} className="chip is-on always__rule">
+                        {connectors.find((c) => c.id === cid)?.name ?? 'conector'} · {tool}
+                        <button
+                          className="always__x"
+                          title="Voltar a pedir aprovação"
+                          onClick={() => {
+                            const autoApprove = draft.autoApprove!.filter((r) => r !== rule)
+                            setDraft((d) => ({ ...d, autoApprove }))
+                            patchAgent(draft.id, { autoApprove })
+                          }}
+                        >
+                          <Icon name="x" size={11} />
+                        </button>
+                      </span>
+                    )
+                  })}
+                </div>
+              )}
+            </Card>
+          )}
 
-          <Card title="Web" lead={`Pesquisa e lê páginas com a ferramenta do próprio Claude Code ou Codex, na sua assinatura. Cada busca aparece nos passos da resposta.${isNew ? '' : ' Muda na hora, sem precisar salvar.'}`}>
-            <div className="segmented segmented--wide" role="radiogroup" aria-label="Web">
-              {[false, true].map((v) => (
-                <button
-                  key={String(v)}
-                  role="radio"
-                  aria-checked={(draft.web !== false) === v}
-                  className={(draft.web !== false) === v ? 'is-active' : ''}
-                  onClick={() => (isNew ? patch({ web: v }) : (setDraft((d) => ({ ...d, web: v })), patchAgent(draft.id, { web: v })))}
-                >
-                  {v ? 'Ligada' : 'Desligada'}
-                </button>
-              ))}
-            </div>
-          </Card>
-
-          <Card
-            title="Navegador"
-            lead={`Um Chrome só dele: abre páginas, clica, preenche e lê como uma pessoa, com logins separados dos seus (você entra pelo Assumir). Clique que compra, publica, envia ou apaga pede sua aprovação.${isNew ? '' : ' Muda na hora, sem precisar salvar.'}`}
-          >
-            <div className="segmented segmented--wide" role="radiogroup" aria-label="Navegador">
-              {[false, true].map((v) => (
-                <button
-                  key={String(v)}
-                  role="radio"
-                  aria-checked={!!draft.browser === v}
-                  className={!!draft.browser === v ? 'is-active' : ''}
-                  onClick={() => (isNew ? patch({ browser: v }) : (setDraft((d) => ({ ...d, browser: v })), patchAgent(draft.id, { browser: v })))}
-                >
-                  {v ? 'Ligado' : 'Desligado'}
-                </button>
-              ))}
-            </div>
-            {!isNew && draft.browser && (
-              <div className="row computer__actions">
-                <button className="btn btn--sm btn--ghost" title="Abre a janela do navegador dele pra você entrar nas contas" onClick={() => browserAction(draft.id, 'show')}>
-                  Abrir o navegador dele
-                </button>
-                <button
-                  className="btn btn--sm btn--ghost"
-                  onClick={() => confirm(`Apagar os logins, cookies e histórico do navegador de ${draft.name}?`) && browserAction(draft.id, 'clear')}
-                >
-                  Apagar logins
-                </button>
+          {pane('ferramentas') && (
+            <Card title="Web" lead={`Pesquisa e lê páginas com a ferramenta do próprio Claude Code ou Codex, na sua assinatura. Cada busca aparece nos passos da resposta.${isNew ? '' : ' Muda na hora, sem precisar salvar.'}`}>
+              <div className="segmented segmented--wide" role="radiogroup" aria-label="Web">
+                {[false, true].map((v) => (
+                  <button
+                    key={String(v)}
+                    role="radio"
+                    aria-checked={(draft.web !== false) === v}
+                    className={(draft.web !== false) === v ? 'is-active' : ''}
+                    onClick={() => (isNew ? patch({ web: v }) : (setDraft((d) => ({ ...d, web: v })), patchAgent(draft.id, { web: v })))}
+                  >
+                    {v ? 'Ligada' : 'Desligada'}
+                  </button>
+                ))}
               </div>
-            )}
-          </Card>
+            </Card>
+          )}
 
-          {!isNew && (
+          {pane('ferramentas') && (
+            <Card
+              title="Navegador"
+              lead={`Um Chrome só dele: abre páginas, clica, preenche e lê como uma pessoa, com logins separados dos seus (você entra pelo Assumir). Clique que compra, publica, envia ou apaga pede sua aprovação.${isNew ? '' : ' Muda na hora, sem precisar salvar.'}`}
+            >
+              <div className="segmented segmented--wide" role="radiogroup" aria-label="Navegador">
+                {[false, true].map((v) => (
+                  <button
+                    key={String(v)}
+                    role="radio"
+                    aria-checked={!!draft.browser === v}
+                    className={!!draft.browser === v ? 'is-active' : ''}
+                    onClick={() => (isNew ? patch({ browser: v }) : (setDraft((d) => ({ ...d, browser: v })), patchAgent(draft.id, { browser: v })))}
+                  >
+                    {v ? 'Ligado' : 'Desligado'}
+                  </button>
+                ))}
+              </div>
+              {!isNew && draft.browser && (
+                <div className="row computer__actions">
+                  <button className="btn btn--sm btn--ghost" title="Abre a janela do navegador dele pra você entrar nas contas" onClick={() => browserAction(draft.id, 'show')}>
+                    Abrir o navegador dele
+                  </button>
+                  <button
+                    className="btn btn--sm btn--ghost"
+                    onClick={() => confirm(`Apagar os logins, cookies e histórico do navegador de ${draft.name}?`) && browserAction(draft.id, 'clear')}
+                  >
+                    Apagar logins
+                  </button>
+                </div>
+              )}
+            </Card>
+          )}
+
+          {!isNew && pane('ferramentas') && (
             <ComputerCard
               agentId={draft.id}
               kind={draft.computer ? (draft.computerKind ?? 'linux') : 'none'}
@@ -375,107 +417,111 @@ export function AgentPage({ id }: { id?: string }): ReactNode {
             />
           )}
 
-          <Card
-            title="Memória"
-            lead={`Memórias sobre você valem pra todos os agentes; as notas de trabalho são só dele.${isNew ? '' : ' Muda na hora, sem precisar salvar.'}`}
-          >
-            <div className="segmented segmented--wide" role="radiogroup" aria-label="Memória">
-              {MEMORY_MODES.map((m) => (
-                <button
-                  key={m.value}
-                  role="radio"
-                  aria-checked={draft.memory === m.value}
-                  className={draft.memory === m.value ? 'is-active' : ''}
-                  onClick={() => {
-                    if (isNew) return patch({ memory: m.value })
-                    setDraft((d) => ({ ...d, memory: m.value }))
-                    patchAgent(draft.id, { memory: m.value })
-                    setMemorySaved(true)
-                  }}
-                >
-                  {m.label}
-                </button>
-              ))}
-            </div>
-            <p className="hint">
-              {MEMORY_MODES.find((m) => m.value === draft.memory)?.hint} {memorySaved && <span className="saved">Salvo</span>}
-            </p>
-            {!isNew && (
-              <p className="muted small">
-                {notes ? `${notes} nota${notes === 1 ? '' : 's'} de trabalho.` : 'Nenhuma nota de trabalho ainda.'}{' '}
-                <button className="link" onClick={() => navigate({ kind: 'memory' })}>
-                  Ver em Memória
-                </button>
-              </p>
-            )}
-          </Card>
-
-          <Card title="Motor e modelo" lead="O agente roda na CLI que você já usa, com a sua assinatura. Sem chave de API, sem cobrança por uso.">
-            <div className="segmented segmented--wide" role="radiogroup" aria-label="Motor">
-              {(Object.keys(ENGINES) as EngineId[]).map((e) => (
-                <button key={e} role="radio" aria-checked={engine === e} className={engine === e ? 'is-active' : ''} onClick={() => pickEngine(e)}>
-                  {ENGINES[e].label}
-                </button>
-              ))}
-            </div>
-            {!engineStatus.loggedIn && (
-              <p className="hint hint--warn">
-                <Icon name="lock" size={13} /> O {ENGINES[engine].label} não está logado.{' '}
-                <button className="link" onClick={() => navigate({ kind: 'settings' })}>
-                  Entrar em Configurações
-                </button>
-              </p>
-            )}
-            {work ? (
-              <Field label="Modelo" hint="O nome exato que o gateway da sua empresa dá ao modelo.">
-                <input className="model-name" value={custom ? (model?.id ?? '') : ''} placeholder={custom ? '' : `Hoje: ${model?.label ?? draft.modelId}`} spellCheck={false} onChange={(e) => patch({ modelId: customModel(engine, e.target.value) })} />
-              </Field>
-            ) : (
-              <div className="models">
-                {models
-                  .filter((m) => m.engine === engine)
-                  .map((m) => (
-                    <label key={m.id} className={`model ${draft.modelId === m.id ? 'is-active' : ''}`}>
-                      <input type="radio" name="model" checked={draft.modelId === m.id} onChange={() => patch({ modelId: m.id })} />
-                      <strong>{m.label}</strong>
-                      <span className="muted small">{m.hint}</span>
-                    </label>
-                  ))}
-                <div className={`model model--custom ${custom ? 'is-active' : ''}`} onClick={() => !custom && patch({ modelId: customModel(engine, '') })}>
-                  <strong>Outro modelo</strong>
-                  <input
-                    className="model__name"
-                    value={custom ? (model?.id ?? '') : ''}
-                    placeholder={engine === 'claude' ? 'ex.: claude-sonnet-4-5' : 'ex.: gpt-4.1'}
-                    spellCheck={false}
-                    onChange={(e) => patch({ modelId: customModel(engine, e.target.value) })}
-                  />
-                  <span className="muted small">O nome exato que o gateway da sua empresa usa.</span>
-                </div>
+          {pane('memoria') && (
+            <Card
+              title="Memória"
+              lead={`Memórias sobre você valem pra todos os agentes; as notas de trabalho são só dele.${isNew ? '' : ' Muda na hora, sem precisar salvar.'}`}
+            >
+              <div className="segmented segmented--wide" role="radiogroup" aria-label="Memória">
+                {MEMORY_MODES.map((m) => (
+                  <button
+                    key={m.value}
+                    role="radio"
+                    aria-checked={draft.memory === m.value}
+                    className={draft.memory === m.value ? 'is-active' : ''}
+                    onClick={() => {
+                      if (isNew) return patch({ memory: m.value })
+                      setDraft((d) => ({ ...d, memory: m.value }))
+                      patchAgent(draft.id, { memory: m.value })
+                      setMemorySaved(true)
+                    }}
+                  >
+                    {m.label}
+                  </button>
+                ))}
               </div>
-            )}
-            <div className="grid2">
-              <Field label="Esforço de raciocínio" hint="Mais esforço pensa mais e gasta mais do plano.">
-                <select value={draft.effort} onChange={(e) => patch({ effort: e.target.value as Agent['effort'] })}>
-                  {EFFORTS.map((ef) => (
-                    <option key={ef.id} value={ef.id}>
-                      {ef.label}
-                    </option>
-                  ))}
-                </select>
-              </Field>
-              <Field label="Limite mensal (milhões de tokens)" hint={`Conferido antes de cada turno. No limite, ${draft.name || 'o agente'} para e avisa.`}>
-                <input
-                  type="number"
-                  min={0}
-                  step={0.5}
-                  value={draft.limit / 1_000_000}
-                  onChange={(e) => patch({ limit: Math.max(0, Math.round(Number(e.target.value) * 1_000_000)) })}
-                  className="input--short"
-                />
-              </Field>
-            </div>
-          </Card>
+              <p className="hint">
+                {MEMORY_MODES.find((m) => m.value === draft.memory)?.hint} {memorySaved && <span className="saved">Salvo</span>}
+              </p>
+              {!isNew && (
+                <p className="muted small">
+                  {notes ? `${notes} nota${notes === 1 ? '' : 's'} de trabalho.` : 'Nenhuma nota de trabalho ainda.'}{' '}
+                  <button className="link" onClick={() => navigate({ kind: 'memory' })}>
+                    Ver em Memória
+                  </button>
+                </p>
+              )}
+            </Card>
+          )}
+
+          {pane('perfil') && (
+            <Card title="Motor e modelo" lead="O agente roda na CLI que você já usa, com a sua assinatura. Sem chave de API, sem cobrança por uso.">
+              <div className="segmented segmented--wide" role="radiogroup" aria-label="Motor">
+                {(Object.keys(ENGINES) as EngineId[]).map((e) => (
+                  <button key={e} role="radio" aria-checked={engine === e} className={engine === e ? 'is-active' : ''} onClick={() => pickEngine(e)}>
+                    {ENGINES[e].label}
+                  </button>
+                ))}
+              </div>
+              {!engineStatus.loggedIn && (
+                <p className="hint hint--warn">
+                  <Icon name="lock" size={13} /> O {ENGINES[engine].label} não está logado.{' '}
+                  <button className="link" onClick={() => navigate({ kind: 'settings' })}>
+                    Entrar em Configurações
+                  </button>
+                </p>
+              )}
+              {work ? (
+                <Field label="Modelo" hint="O nome exato que o gateway da sua empresa dá ao modelo.">
+                  <input className="model-name" value={custom ? (model?.id ?? '') : ''} placeholder={custom ? '' : `Hoje: ${model?.label ?? draft.modelId}`} spellCheck={false} onChange={(e) => patch({ modelId: customModel(engine, e.target.value) })} />
+                </Field>
+              ) : (
+                <div className="models">
+                  {models
+                    .filter((m) => m.engine === engine)
+                    .map((m) => (
+                      <label key={m.id} className={`model ${draft.modelId === m.id ? 'is-active' : ''}`}>
+                        <input type="radio" name="model" checked={draft.modelId === m.id} onChange={() => patch({ modelId: m.id })} />
+                        <strong>{m.label}</strong>
+                        <span className="muted small">{m.hint}</span>
+                      </label>
+                    ))}
+                  <div className={`model model--custom ${custom ? 'is-active' : ''}`} onClick={() => !custom && patch({ modelId: customModel(engine, '') })}>
+                    <strong>Outro modelo</strong>
+                    <input
+                      className="model__name"
+                      value={custom ? (model?.id ?? '') : ''}
+                      placeholder={engine === 'claude' ? 'ex.: claude-sonnet-4-5' : 'ex.: gpt-4.1'}
+                      spellCheck={false}
+                      onChange={(e) => patch({ modelId: customModel(engine, e.target.value) })}
+                    />
+                    <span className="muted small">O nome exato que o gateway da sua empresa usa.</span>
+                  </div>
+                </div>
+              )}
+              <div className="grid2">
+                <Field label="Esforço de raciocínio" hint="Mais esforço pensa mais e gasta mais do plano.">
+                  <select value={draft.effort} onChange={(e) => patch({ effort: e.target.value as Agent['effort'] })}>
+                    {EFFORTS.map((ef) => (
+                      <option key={ef.id} value={ef.id}>
+                        {ef.label}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+                <Field label="Limite mensal (milhões de tokens)" hint={`Conferido antes de cada turno. No limite, ${draft.name || 'o agente'} para e avisa.`}>
+                  <input
+                    type="number"
+                    min={0}
+                    step={0.5}
+                    value={draft.limit / 1_000_000}
+                    onChange={(e) => patch({ limit: Math.max(0, Math.round(Number(e.target.value) * 1_000_000)) })}
+                    className="input--short"
+                  />
+                </Field>
+              </div>
+            </Card>
+          )}
         </div>
 
         <aside className="agent-side">
@@ -1252,6 +1298,41 @@ function AgentSkills({ agentId, name }: { agentId: string; name: string }): Reac
   )
 }
 
+// ---------- tabs ----------
+
+type TabList = readonly (readonly [string, string])[]
+const SETTINGS_TABS: TabList = [
+  ['geral', 'Geral'],
+  ['modelos', 'Modelos'],
+  ['agentes', 'Agentes'],
+  ['integracoes', 'Celular e GitHub']
+]
+const AGENT_TABS: TabList = [
+  ['perfil', 'Perfil'],
+  ['canais', 'Canais e skills'],
+  ['ferramentas', 'Ferramentas'],
+  ['memoria', 'Memória']
+]
+
+// The page's open tab, kept while the app is open; the first one when the kept one isn't there.
+function useTab(page: string, tabs: TabList): string {
+  const kept = useStore((s) => s.tabs[page])
+  return tabs.some(([id]) => id === kept) ? kept! : tabs[0]![0]
+}
+
+function Tabs({ page, tabs }: { page: string; tabs: TabList }): ReactNode {
+  const active = useTab(page, tabs)
+  return (
+    <div className="tabs" role="tablist">
+      {tabs.map(([id, label]) => (
+        <button key={id} role="tab" aria-selected={active === id} className={active === id ? 'is-active' : ''} onClick={() => setTab(page, id)}>
+          {label}
+        </button>
+      ))}
+    </div>
+  )
+}
+
 // A model from the list, or any name a company gateway gives one ("Outro modelo"), kept as "<engine>:<name>".
 // With an empty value it asks for a choice (the introduction makes the person pick).
 export function ModelSelect({ value, onChange, jev, engines }: { value: string; onChange: (v: string) => void; jev?: boolean; engines?: EngineId[] }): ReactNode {
@@ -1535,194 +1616,212 @@ function JevKey({ saved, hint }: { saved: boolean; hint?: string }): ReactNode {
 export function SettingsPage(): ReactNode {
   const settings = useStore((s) => s.settings)
   const packaged = useStore((s) => s.packaged)
-  const models = useStore((s) => s.models)
+  // At work, the personal Telegram and GitHub tab isn't there at all.
+  const tabs = settings.mode === 'work' ? SETTINGS_TABS.filter(([id]) => id !== 'integracoes') : SETTINGS_TABS
+  const tab = useTab('settings', tabs)
+  const pane = (t: string): boolean => tab === t
   return (
     <Page title="Configurações">
+      <Tabs page="settings" tabs={tabs} />
       <div className="agent-form">
-        <Card title="Workspace">
-          <Field label="Nome">
-            <input value={settings.workspaceName} onChange={(e) => updateSettings({ workspaceName: e.target.value })} />
-          </Field>
-          <Field label="Contexto" hint="Entra em toda conversa de todo agente: quem você é, o que faz, o que importa agora e o que nunca fazer.">
-            <textarea rows={5} value={settings.context} onChange={(e) => updateSettings({ context: e.target.value })} />
-          </Field>
-          <Field label="Onde você usa" hint={settings.mode === 'work' ? 'Os modelos são escolhidos pelo nome do gateway da empresa; Telegram e GitHub ficam de fora.' : 'Na sua assinatura: modelos da lista, celular pelo Telegram e PRs no GitHub.'}>
-            <div className="segmented">
-              {(
-                [
-                  ['personal', 'Pra mim'],
-                  ['work', 'No trabalho']
-                ] as const
-              ).map(([v, label]) => (
-                <button key={v} className={(settings.mode ?? 'personal') === v ? 'is-active' : ''} onClick={() => updateSettings({ mode: v })}>
-                  {label}
+        {pane('geral') && (
+          <Card title="Workspace">
+            <Field label="Nome">
+              <input value={settings.workspaceName} onChange={(e) => updateSettings({ workspaceName: e.target.value })} />
+            </Field>
+            <Field label="Contexto" hint="Entra em toda conversa de todo agente: quem você é, o que faz, o que importa agora e o que nunca fazer.">
+              <textarea rows={5} value={settings.context} onChange={(e) => updateSettings({ context: e.target.value })} />
+            </Field>
+            <Field label="Onde você usa" hint={settings.mode === 'work' ? 'Os modelos são escolhidos pelo nome do gateway da empresa; Telegram e GitHub ficam de fora.' : 'Na sua assinatura: modelos da lista, celular pelo Telegram e PRs no GitHub.'}>
+              <div className="segmented">
+                {(
+                  [
+                    ['personal', 'Pra mim'],
+                    ['work', 'No trabalho']
+                  ] as const
+                ).map(([v, label]) => (
+                  <button key={v} className={(settings.mode ?? 'personal') === v ? 'is-active' : ''} onClick={() => updateSettings({ mode: v })}>
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </Field>
+            <div className="row">
+              <button className="btn btn--sm" onClick={() => updateSettings({ onboarding: { done: false } })}>
+                Rever a introdução
+              </button>
+              {settings.onboarding?.checklistHidden && (
+                <button className="btn btn--sm" onClick={() => updateSettings({ onboarding: { done: true } })}>
+                  Mostrar os primeiros passos
+                </button>
+              )}
+            </div>
+          </Card>
+        )}
+
+        {pane('modelos') && (
+          <Card
+            title="Motores"
+            lead="Os agentes rodam nas CLIs instaladas aqui, com o login de cada uma. O app nunca vê nem guarda suas credenciais."
+            action={
+              <button className="btn btn--ghost btn--sm" onClick={refreshEngines}>
+                Verificar de novo
+              </button>
+            }
+          >
+            {(Object.keys(ENGINES) as EngineId[]).map((e) => {
+              const st = settings.engines[e]
+              return (
+                <div key={e} className="key-row">
+                  <Icon name="terminal" />
+                  <div className="grow">
+                    <strong>
+                      {ENGINES[e].label}{' '}
+                      <span className={`tag ${st.loggedIn ? 'tag--ok' : st.installed ? 'tag--warn' : 'tag--danger'}`}>
+                        {st.loggedIn ? 'pronto' : st.installed ? 'não logado' : 'não instalado'}
+                      </span>
+                    </strong>
+                    <span className="muted small">
+                      {st.installed ? (
+                        <>
+                          <span className="mono">{st.path}</span> · v{st.version}
+                          {st.account ? ` · ${st.account}` : ''}
+                        </>
+                      ) : (
+                        `Instale a CLI ${ENGINES[e].cli} e volte aqui.`
+                      )}
+                    </span>
+                    {st.warning && <span className="small warn-text">{st.warning}</span>}
+                  </div>
+                  {st.installed && (
+                    <button className="btn" title={`Abre o Terminal com: ${ENGINES[e].login}`} onClick={() => loginEngine(e)}>
+                      {st.loggedIn ? 'Trocar conta' : 'Entrar'}
+                    </button>
+                  )}
+                </div>
+              )
+            })}
+          </Card>
+        )}
+
+        {pane('modelos') && (
+          <Card title="Router" lead="Modelo pequeno que lê a conversa e decide quem responde. Não concede permissão nenhuma.">
+            <Field label="Modelo do router" hint="Prefira um modelo rápido: ele roda antes de cada resposta num canal.">
+              <ModelSelect value={settings.routerModel} onChange={(routerModel) => updateSettings({ routerModel })} jev />
+            </Field>
+            {settings.routerModel === 'jev' && <JevKey saved={!!settings.jevKey} />}
+          </Card>
+        )}
+
+        {pane('agentes') && (
+          <Card title="Navegador dos agentes" lead="Como o app acha o que o agente pede pra clicar (“o botão Buscar”). Pelo texto é de graça e resolve a maioria; quando não acha, o agente usa o número do elemento.">
+            <div className="segmented segmented--wide" role="radiogroup" aria-label="Navegador dos agentes">
+              {[false, true].map((v) => (
+                <button key={String(v)} role="radio" aria-checked={!!settings.browserJev === v} className={!!settings.browserJev === v ? 'is-active' : ''} onClick={() => updateSettings({ browserJev: v })}>
+                  {v ? 'Jev (TypeSafe)' : 'Só pelo texto da página'}
                 </button>
               ))}
             </div>
-          </Field>
-          <div className="row">
-            <button className="btn btn--sm" onClick={() => updateSettings({ onboarding: { done: false } })}>
-              Rever a introdução
-            </button>
-            {settings.onboarding?.checklistHidden && (
-              <button className="btn btn--sm" onClick={() => updateSettings({ onboarding: { done: true } })}>
-                Mostrar os primeiros passos
-              </button>
+            {settings.browserJev && (
+              <JevKey
+                saved={!!settings.jevKey}
+                hint="Acha o elemento em menos de 1 segundo, até sem texto (pelo print da tela). Mas cada clique que o texto não resolve manda pra TypeSafe a lista de elementos da página e, às vezes, o print dela, inclusive em áreas logadas."
+              />
             )}
-          </div>
-        </Card>
+          </Card>
+        )}
 
-        <Card
-          title="Motores"
-          lead="Os agentes rodam nas CLIs instaladas aqui, com o login de cada uma. O app nunca vê nem guarda suas credenciais."
-          action={
-            <button className="btn btn--ghost btn--sm" onClick={refreshEngines}>
-              Verificar de novo
-            </button>
-          }
-        >
-          {(Object.keys(ENGINES) as EngineId[]).map((e) => {
-            const st = settings.engines[e]
-            return (
-              <div key={e} className="key-row">
-                <Icon name="terminal" />
-                <div className="grow">
-                  <strong>
-                    {ENGINES[e].label}{' '}
-                    <span className={`tag ${st.loggedIn ? 'tag--ok' : st.installed ? 'tag--warn' : 'tag--danger'}`}>
-                      {st.loggedIn ? 'pronto' : st.installed ? 'não logado' : 'não instalado'}
-                    </span>
-                  </strong>
-                  <span className="muted small">
-                    {st.installed ? (
-                      <>
-                        <span className="mono">{st.path}</span> · v{st.version}
-                        {st.account ? ` · ${st.account}` : ''}
-                      </>
-                    ) : (
-                      `Instale a CLI ${ENGINES[e].cli} e volte aqui.`
-                    )}
-                  </span>
-                  {st.warning && <span className="small warn-text">{st.warning}</span>}
-                </div>
-                {st.installed && (
-                  <button className="btn" title={`Abre o Terminal com: ${ENGINES[e].login}`} onClick={() => loginEngine(e)}>
-                    {st.loggedIn ? 'Trocar conta' : 'Entrar'}
-                  </button>
+        {pane('integracoes') && <PhoneCard info={settings.telegram} />}
+
+        {pane('modelos') && (
+          <Card title="Memória" lead="Um modelo pequeno resume o que sai da janela de cada conversa e, do mesmo trecho, tira o que vale lembrar sobre você.">
+            <div className="grid2">
+              <Field label="Modelo da memória" hint="Roda a cada ~20 mensagens numa conversa longa.">
+                <ModelSelect value={settings.memoryModel} onChange={(memoryModel) => updateSettings({ memoryModel })} />
+              </Field>
+              <Field label="O que ele aprende sobre você" hint="Só conta o que você disse, nunca o que um agente supôs.">
+                <select value={settings.memoryLearning} onChange={(e) => updateSettings({ memoryLearning: e.target.value as typeof settings.memoryLearning })}>
+                  <option value="approve">Vira sugestão pra você aprovar</option>
+                  <option value="auto">Grava sozinho</option>
+                  <option value="off">Nada (só resume)</option>
+                </select>
+              </Field>
+            </div>
+          </Card>
+        )}
+
+        {pane('agentes') && (
+          <Card title="Rotinas" lead="As rotinas rodam enquanto o app está aberto, mesmo com a janela fechada.">
+            <div className="key-row">
+              <Icon name="clock" />
+              <div className="grow">
+                <strong>Abrir ao ligar o Mac</strong>
+                <p className="muted small">{packaged ? 'Assim nenhuma rotina depende de você lembrar de abrir o app.' : 'Só no app instalado. Rodando com npm run dev, fica desligado.'}</p>
+              </div>
+              <Toggle on={!!settings.openAtLogin && packaged} onChange={(v) => packaged && updateSettings({ openAtLogin: v })} />
+            </div>
+            <div className="key-row">
+              <Icon name="moon" />
+              <div className="grow">
+                <strong>Horário de silêncio</strong>
+                <p className="muted small">Rotinas e gatilhos esperam e rodam quando ele acaba (como atrasados). O que você mandar continua sendo respondido.</p>
+                {settings.quietHours && (
+                  <div className="row row--center quiet">
+                    <span className="small">das</span>
+                    <input type="time" value={settings.quietHours.from} onChange={(e) => updateSettings({ quietHours: { ...settings.quietHours!, from: e.target.value } })} />
+                    <span className="small">às</span>
+                    <input type="time" value={settings.quietHours.to} onChange={(e) => updateSettings({ quietHours: { ...settings.quietHours!, to: e.target.value } })} />
+                  </div>
                 )}
               </div>
-            )
-          })}
-        </Card>
-
-        <Card title="Router" lead="Modelo pequeno que lê a conversa e decide quem responde. Não concede permissão nenhuma.">
-          <Field label="Modelo do router" hint="Prefira um modelo rápido: ele roda antes de cada resposta num canal.">
-            <ModelSelect value={settings.routerModel} onChange={(routerModel) => updateSettings({ routerModel })} jev />
-          </Field>
-          {settings.routerModel === 'jev' && <JevKey saved={!!settings.jevKey} />}
-        </Card>
-
-        <Card title="Navegador dos agentes" lead="Como o app acha o que o agente pede pra clicar (“o botão Buscar”). Pelo texto é de graça e resolve a maioria; quando não acha, o agente usa o número do elemento.">
-          <div className="segmented segmented--wide" role="radiogroup" aria-label="Navegador dos agentes">
-            {[false, true].map((v) => (
-              <button key={String(v)} role="radio" aria-checked={!!settings.browserJev === v} className={!!settings.browserJev === v ? 'is-active' : ''} onClick={() => updateSettings({ browserJev: v })}>
-                {v ? 'Jev (TypeSafe)' : 'Só pelo texto da página'}
-              </button>
-            ))}
-          </div>
-          {settings.browserJev && (
-            <JevKey
-              saved={!!settings.jevKey}
-              hint="Acha o elemento em menos de 1 segundo, até sem texto (pelo print da tela). Mas cada clique que o texto não resolve manda pra TypeSafe a lista de elementos da página e, às vezes, o print dela, inclusive em áreas logadas."
-            />
-          )}
-        </Card>
-
-        {settings.mode !== 'work' && <PhoneCard info={settings.telegram} />}
-
-        <Card title="Memória" lead="Um modelo pequeno resume o que sai da janela de cada conversa e, do mesmo trecho, tira o que vale lembrar sobre você.">
-          <div className="grid2">
-            <Field label="Modelo da memória" hint="Roda a cada ~20 mensagens numa conversa longa.">
-              <ModelSelect value={settings.memoryModel} onChange={(memoryModel) => updateSettings({ memoryModel })} />
-            </Field>
-            <Field label="O que ele aprende sobre você" hint="Só conta o que você disse, nunca o que um agente supôs.">
-              <select value={settings.memoryLearning} onChange={(e) => updateSettings({ memoryLearning: e.target.value as typeof settings.memoryLearning })}>
-                <option value="approve">Vira sugestão pra você aprovar</option>
-                <option value="auto">Grava sozinho</option>
-                <option value="off">Nada (só resume)</option>
-              </select>
-            </Field>
-          </div>
-        </Card>
-
-        <Card title="Rotinas" lead="As rotinas rodam enquanto o app está aberto, mesmo com a janela fechada.">
-          <div className="key-row">
-            <Icon name="clock" />
-            <div className="grow">
-              <strong>Abrir ao ligar o Mac</strong>
-              <p className="muted small">{packaged ? 'Assim nenhuma rotina depende de você lembrar de abrir o app.' : 'Só no app instalado. Rodando com npm run dev, fica desligado.'}</p>
+              <Toggle on={!!settings.quietHours} onChange={(v) => updateSettings({ quietHours: v ? { from: '22:00', to: '07:00' } : null })} />
             </div>
-            <Toggle on={!!settings.openAtLogin && packaged} onChange={(v) => packaged && updateSettings({ openAtLogin: v })} />
-          </div>
-          <div className="key-row">
-            <Icon name="moon" />
-            <div className="grow">
-              <strong>Horário de silêncio</strong>
-              <p className="muted small">Rotinas e gatilhos esperam e rodam quando ele acaba (como atrasados). O que você mandar continua sendo respondido.</p>
-              {settings.quietHours && (
-                <div className="row row--center quiet">
-                  <span className="small">das</span>
-                  <input type="time" value={settings.quietHours.from} onChange={(e) => updateSettings({ quietHours: { ...settings.quietHours!, from: e.target.value } })} />
-                  <span className="small">às</span>
-                  <input type="time" value={settings.quietHours.to} onChange={(e) => updateSettings({ quietHours: { ...settings.quietHours!, to: e.target.value } })} />
-                </div>
-              )}
+          </Card>
+        )}
+
+        {pane('integracoes') && <GithubCard info={settings.github} />}
+
+        {pane('geral') && <TeamCard />}
+
+        {pane('agentes') && (
+          <Card title="Limites">
+            <div className="grid2">
+              <Field label="Limite padrão por agente (milhões de tokens/mês)">
+                <input
+                  type="number"
+                  min={0}
+                  step={0.5}
+                  value={settings.defaultLimit / 1_000_000}
+                  onChange={(e) => updateSettings({ defaultLimit: Math.max(0, Math.round(Number(e.target.value) * 1_000_000)) })}
+                />
+              </Field>
+              <Field label="Teto por resposta (% do limite do mês)" hint="Chegou nele, o agente pausa e você decide se continua.">
+                <input
+                  type="number"
+                  min={1}
+                  max={100}
+                  value={settings.runBudgetPct ?? RUN_BUDGET_PCT}
+                  onChange={(e) => updateSettings({ runBudgetPct: Math.min(100, Math.max(1, Math.round(Number(e.target.value)))) })}
+                />
+              </Field>
+              <Field label="Travado depois de (minutos sem sinal)" hint="Sem texto nem ferramenta terminando. Trabalho longo que anda não é cortado.">
+                <input
+                  type="number"
+                  min={5}
+                  value={settings.runStallMinutes ?? RUN_STALL_MINUTES}
+                  onChange={(e) => updateSettings({ runStallMinutes: Math.max(5, Math.round(Number(e.target.value))) })}
+                />
+              </Field>
+              <Field label="Expiração de aprovações">
+                <select value={settings.approvalTtlHours} onChange={(e) => updateSettings({ approvalTtlHours: Number(e.target.value) })}>
+                  <option value="1">1 hora</option>
+                  <option value="24">24 horas</option>
+                  <option value="168">7 dias</option>
+                </select>
+              </Field>
             </div>
-            <Toggle on={!!settings.quietHours} onChange={(v) => updateSettings({ quietHours: v ? { from: '22:00', to: '07:00' } : null })} />
-          </div>
-        </Card>
-
-        {settings.mode !== 'work' && <GithubCard info={settings.github} />}
-
-        <TeamCard />
-
-        <Card title="Limites">
-          <div className="grid2">
-            <Field label="Limite padrão por agente (milhões de tokens/mês)">
-              <input
-                type="number"
-                min={0}
-                step={0.5}
-                value={settings.defaultLimit / 1_000_000}
-                onChange={(e) => updateSettings({ defaultLimit: Math.max(0, Math.round(Number(e.target.value) * 1_000_000)) })}
-              />
-            </Field>
-            <Field label="Teto por resposta (% do limite do mês)" hint="Chegou nele, o agente pausa e você decide se continua.">
-              <input
-                type="number"
-                min={1}
-                max={100}
-                value={settings.runBudgetPct ?? RUN_BUDGET_PCT}
-                onChange={(e) => updateSettings({ runBudgetPct: Math.min(100, Math.max(1, Math.round(Number(e.target.value)))) })}
-              />
-            </Field>
-            <Field label="Travado depois de (minutos sem sinal)" hint="Sem texto nem ferramenta terminando. Trabalho longo que anda não é cortado.">
-              <input
-                type="number"
-                min={5}
-                value={settings.runStallMinutes ?? RUN_STALL_MINUTES}
-                onChange={(e) => updateSettings({ runStallMinutes: Math.max(5, Math.round(Number(e.target.value))) })}
-              />
-            </Field>
-            <Field label="Expiração de aprovações">
-              <select value={settings.approvalTtlHours} onChange={(e) => updateSettings({ approvalTtlHours: Number(e.target.value) })}>
-                <option value="1">1 hora</option>
-                <option value="24">24 horas</option>
-                <option value="168">7 dias</option>
-              </select>
-            </Field>
-          </div>
-        </Card>
+          </Card>
+        )}
       </div>
     </Page>
   )

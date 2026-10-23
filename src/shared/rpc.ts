@@ -28,6 +28,7 @@ export interface Api {
   saveAgent(p: { agent: Agent; channelIds: string[] }): void
   createChannel(p: { name: string }): string
   renameChannel(p: { id: string; name: string }): void // throws a message when the name is taken
+  archiveAgent(p: { id: string; archived: boolean }): void // out of the sidebar, its replies stopped and routines off; back with archived: false
   setTopic(p: { id: string; topic: string }): void
   setChannelMembers(p: { id: string; agentIds: string[] }): void
   deleteConversation(p: { id: string }): void // a channel or a DM, with its messages, routines and project memory

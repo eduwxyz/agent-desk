@@ -104,6 +104,18 @@ Se no trabalho o seu Claude Code ou Codex manda os pedidos por um proxy da empre
 
 Em **Configurações**, o motor aparece como "Gateway …", e o app já sugere o modo **No trabalho**: nele, onde estaria a lista de modelos (Sonnet, Opus…) fica só o campo pro nome que o gateway usa, na página de cada agente e em Configurações (**Router** e **Memória**). No modo **Pra mim**, o mesmo campo aparece em **Outro modelo…**.
 
+## Atalhos
+
+| | |
+|---|---|
+| **⌘K** | Ir pra qualquer canal, conversa, agente ou tela digitando o nome |
+| **⌘N** | Novo canal (em seguida, você escolhe os agentes) |
+| **⌘1 … ⌘9** | Os canais, na ordem da barra lateral |
+| **⌘,** | Configurações |
+| **Botão direito** | Num canal: agentes, renomear, tema, projeto, excluir. Num agente: mensagem, editar, arquivar. Numa DM: apagar a conversa. |
+
+Agentes arquivados saem da barra lateral e param de responder, mas o histórico e os recibos ficam. Eles aparecem em **Arquivados**, no fim da lista de agentes, pra reativar.
+
 ## Atualizar
 
 Rode o mesmo comando do passo 2. Ele fecha o app aberto (depois que as respostas em andamento terminam), troca pela versão nova e abre de novo. Seus agentes, conversas e conectores continuam onde estavam.

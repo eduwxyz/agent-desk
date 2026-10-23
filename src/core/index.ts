@@ -369,8 +369,9 @@ const api: Api = {
   continueRun: ({ messageId }) => void runner.continue(messageId),
 
   saveAgent: ({ agent, channelIds }) => {
-    const clean: Agent = { ...agent, name: agent.name.trim(), handle: agent.handle.trim().toLowerCase() }
-    const before = db.agent(clean.id)
+    const before = db.agent(agent.id)
+    // Archived changes only through archiveAgent, which also stops what the agent was doing.
+    const clean: Agent = { ...agent, name: agent.name.trim(), handle: agent.handle.trim().toLowerCase(), archived: before?.archived ?? false }
     const linux = (a?: Agent): boolean => !!a?.computer && a.computerKind !== 'mac'
     const mac = (a?: Agent): boolean => !!a?.computer && a.computerKind === 'mac'
     db.saveAgent(clean)
@@ -391,6 +392,20 @@ const api: Api = {
     if (changed.length) syncProjectFolders()
   },
 
+  // Archived, an agent keeps its history and receipts but stops: replies running end,
+  // its routines turn off, its browser closes. Its channels and settings stay for when it comes back.
+  archiveAgent: ({ id, archived }) => {
+    const agent = db.agent(id)
+    if (!agent || agent.archived === archived) return
+    if (archived) {
+      for (const m of db.messages()) if (m.author.kind === 'agent' && m.author.id === id && (m.run?.status === 'working' || m.run?.status === 'waiting_approval')) runner.stop(m.id)
+      routines.pauseAgent(id)
+      if (agent.browser) void browser.close(id)
+    }
+    db.saveAgent({ ...agent, archived })
+    emit({ type: 'agent', agent: db.agent(id)! })
+    emitConversations()
+  },
   renameChannel: ({ id, name }) => {
     const conv = db.conversation(id)
     if (conv?.kind !== 'channel') return
@@ -429,8 +444,11 @@ const api: Api = {
   },
 
   createChannel: ({ name }) => {
+    const clean = channelName(name)
+    if (!clean) throw new Error('Dê um nome ao canal.')
+    if (db.conversations().some((c) => c.kind === 'channel' && c.name === clean)) throw new Error(`Já existe o canal #${clean}.`)
     const id = randomUUID()
-    db.createConversation({ id, kind: 'channel', name, members: [] })
+    db.createConversation({ id, kind: 'channel', name: clean, members: [] })
     emitConversations([id])
     return id
   },

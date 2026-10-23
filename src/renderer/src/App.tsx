@@ -1,5 +1,5 @@
 import { useEffect, type ReactNode } from 'react'
-import { useStore } from './store'
+import { getState, navigate, openDialog, useStore } from './store'
 import { Sidebar } from './components/Sidebar'
 import { ConversationView } from './components/Conversation'
 import { AgentPage, ApprovalsPage, ConnectorsPage, SettingsPage, UsagePage } from './components/Pages'
@@ -19,6 +19,23 @@ export function App(): ReactNode {
     if (theme === 'system') delete document.documentElement.dataset['theme']
     else document.documentElement.dataset['theme'] = theme
   }, [theme])
+
+  // ⌘K go anywhere · ⌘N new channel · ⌘1–9 the channels in order · ⌘, settings
+  useEffect(() => {
+    const keys = (e: KeyboardEvent): void => {
+      if (!e.metaKey || e.ctrlKey || e.altKey || intro) return
+      const s = getState()
+      const channels = s.conversations.filter((c) => c.kind === 'channel')
+      if (e.key === 'k') openDialog(s.dialog?.kind === 'search' ? null : { kind: 'search' })
+      else if (e.key === 'n' && !e.shiftKey) openDialog({ kind: 'new-channel' })
+      else if (e.key === ',') navigate({ kind: 'settings' })
+      else if (/^[1-9]$/.test(e.key) && channels[Number(e.key) - 1]) navigate({ kind: 'conversation', id: channels[Number(e.key) - 1]!.id })
+      else return
+      e.preventDefault()
+    }
+    window.addEventListener('keydown', keys)
+    return () => window.removeEventListener('keydown', keys)
+  }, [intro])
 
   if (!view) return <div className="boot" />
   if (intro) return <Onboarding />

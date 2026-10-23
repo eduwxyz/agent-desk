@@ -1,8 +1,7 @@
 import { useCallback, useState, type ReactNode } from 'react'
 import {
   agentById,
-  channelName,
-  createChannel,
+  archiveAgent,
   deleteConversation,
   markRead,
   navigate,
@@ -38,8 +37,6 @@ export function Sidebar(): ReactNode {
   const pending = pendingApprovals(s).length
   const suggestions = pendingMemories(s).length
   const proposals = s.skills.filter((k) => k.state === 'pending').length
-  const [adding, setAdding] = useState(false)
-  const [name, setName] = useState('')
   const [menu, setMenu] = useState<MenuState>(null)
   const closeMenu = useCallback(() => setMenu(null), [])
   const open = (e: React.MouseEvent, items: MenuItem[]): void => {
@@ -82,17 +79,19 @@ export function Sidebar(): ReactNode {
       }
     }
   ]
-  const agentMenu = (agentId: string): MenuItem[] => [
+  const agentMenu = (agentId: string, agentName: string): MenuItem[] => [
     { label: 'Mandar mensagem', icon: 'send', onClick: () => void openDm(agentId) },
-    { label: 'Editar', icon: 'edit', onClick: () => navigate({ kind: 'agent', id: agentId }) }
+    { label: 'Editar', icon: 'edit', onClick: () => navigate({ kind: 'agent', id: agentId }) },
+    'separator',
+    {
+      label: 'Arquivar…',
+      icon: 'trash',
+      danger: true,
+      onClick: () => {
+        if (confirm(`Arquivar ${agentName}?\n\nSai da barra lateral e para de responder; as rotinas dele desligam. O histórico e os recibos ficam, e dá pra reativar em "Arquivados", no fim da lista de agentes.`)) void archiveAgent(agentId, true)
+      }
+    }
   ]
-
-  const submitChannel = (): void => {
-    const clean = channelName(name)
-    if (clean) void createChannel(clean)
-    setName('')
-    setAdding(false)
-  }
 
   const isDark =
     s.settings.theme === 'dark' || (s.settings.theme === 'system' && matchMedia('(prefers-color-scheme: dark)').matches)
@@ -134,7 +133,7 @@ export function Sidebar(): ReactNode {
         <div className="section">
           <div className="section__head">
             <span>Canais</span>
-            <button className="icon-btn icon-btn--sm" title="Novo canal" onClick={() => setAdding(true)}>
+            <button className="icon-btn icon-btn--sm" title="Novo canal (⌘N)" onClick={() => openDialog({ kind: 'new-channel' })}>
               <Icon name="plus" size={14} />
             </button>
           </div>
@@ -143,25 +142,6 @@ export function Sidebar(): ReactNode {
               <ChannelItem id={c.id} name={c.name} unread={c.unread} />
             </div>
           ))}
-          {adding && (
-            <form
-              className="inline-form"
-              onSubmit={(e) => {
-                e.preventDefault()
-                submitChannel()
-              }}
-            >
-              <Icon name="hash" />
-              <input
-                autoFocus
-                value={name}
-                placeholder="nome-do-canal"
-                onChange={(e) => setName(e.target.value)}
-                onBlur={submitChannel}
-                onKeyDown={(e) => e.key === 'Escape' && setAdding(false)}
-              />
-            </form>
-          )}
         </div>
 
         <div className="section">
@@ -189,10 +169,17 @@ export function Sidebar(): ReactNode {
           {s.agents
             .filter((a) => !a.archived)
             .map((a) => (
-              <div key={a.id} onContextMenu={(e) => open(e, agentMenu(a.id))}>
+              <div key={a.id} onContextMenu={(e) => open(e, agentMenu(a.id, a.name))}>
                 <AgentItem id={a.id} />
               </div>
             ))}
+          {s.agents.some((a) => a.archived) && (
+            <button className="nav-item nav-item--quiet" onClick={() => openDialog({ kind: 'archived' })}>
+              <Icon name="layers" />
+              <span className="nav-item__label">Arquivados</span>
+              <span className="nav-item__meta">{s.agents.filter((a) => a.archived).length}</span>
+            </button>
+          )}
         </div>
       </nav>
 

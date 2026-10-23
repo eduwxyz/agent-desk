@@ -42,7 +42,7 @@ export function ConversationView({ id }: { id: string }): ReactNode {
   const members = useStore((s) => (conv ? conv.members.map((m) => agentById(s, m)).filter((a): a is Agent => !!a) : []))
   const messages = useStore((s) => s.messages.filter((m) => m.conversationId === id))
   const [showSummary, setShowSummary] = useState(false)
-  const showProject = useStore((s) => s.dialog?.kind === 'project' && s.dialog.id === id)
+  const showProject = useStore((s) => s.dialog?.kind === 'project' && 'id' in s.dialog && s.dialog.id === id)
   const setShowProject = (on: boolean): void => openDialog(on ? { kind: 'project', id } : null)
 
   if (!conv) return <div className="empty">Conversa não encontrada.</div>

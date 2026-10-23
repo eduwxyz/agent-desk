@@ -270,6 +270,11 @@ export class Routines {
     while (this.runs.size) await Promise.all(this.runs)
   }
 
+  // An archived agent's routines stop; turning one back on is up to me.
+  pauseAgent(agentId: string): void {
+    for (const r of this.deps.db.routines()) if (r.agentId === agentId && r.enabled) this.store({ ...r, enabled: false, nextAt: undefined })
+  }
+
   private store(r: Routine): void {
     this.deps.db.saveRoutine(r)
     this.deps.emit({ type: 'routine', routine: r })
