@@ -38,6 +38,8 @@ import {
   RUN_STALL_MINUTES,
   countedTokens,
   customModel,
+  saveSkill,
+  skillApplies,
   modelInfo,
   type Agent,
   type AgentColor,
@@ -46,6 +48,7 @@ import {
   type EngineId,
   type GrantLevel,
   type MemoryMode,
+  type Skill,
   type ToolClass
 } from '../store'
 import { ApprovalCard } from './Conversation'
@@ -217,6 +220,8 @@ export function AgentPage({ id }: { id?: string }): ReactNode {
             </div>
             <p className="hint">Fora desses canais, chame com @{draft.handle || 'handle'} ou mande DM.</p>
           </Card>
+
+          {!isNew && <AgentSkills agentId={draft.id} name={draft.name} />}
 
           <Card
             title="Ferramentas e acesso"
@@ -1194,6 +1199,47 @@ function AddConnector({ onDone }: { onDone: (id?: string) => void }): ReactNode 
           {busy ? 'Conectando…' : 'Conectar'}
         </button>
       </div>
+    </Card>
+  )
+}
+
+// The skills this agent follows: a box per active skill. Changes save right away.
+function AgentSkills({ agentId, name }: { agentId: string; name: string }): ReactNode {
+  const skills = useStore((s) => s.skills.filter((k) => k.state === 'active'))
+  const everyone = useStore((s) => s.agents.filter((a) => !a.archived).map((a) => a.id))
+  const toggle = (k: Skill, on: boolean): void => {
+    let agents = on ? (k.agents.length === 0 ? [] : [...k.agents, agentId]) : (k.agents.length === 0 ? everyone : k.agents).filter((x) => x !== agentId)
+    if (on && agents.length >= everyone.length && everyone.every((id) => agents.includes(id))) agents = [] // everyone again
+    void saveSkill({ id: k.id, name: k.name, description: k.description, body: k.body, agents, source: k.source })
+  }
+  return (
+    <Card title="Skills" lead={`As receitas que ${name || 'o agente'} segue. Ele vê o nome e quando usar de cada uma, e lê a receita quando a tarefa bate.`}>
+      {skills.length === 0 ? (
+        <p className="muted small">
+          Nenhuma skill ainda.{' '}
+          <button className="link" onClick={() => navigate({ kind: 'skills' })}>
+            Criar ou trazer do Claude Code
+          </button>
+        </p>
+      ) : (
+        <div className="checks checks--skills">
+          {skills.map((k) => {
+            const on = skillApplies(k, agentId)
+            const only = on && k.agents.length === 1
+            return (
+              <label key={k.id} className="check check--skill" title={only ? `Só ${name || 'este agente'} usa: pra ninguém usar, arquive em Skills` : undefined}>
+                <input type="checkbox" checked={on} disabled={only} onChange={(e) => toggle(k, e.target.checked)} />
+                <span>
+                  <strong>{k.name}</strong>
+                  {k.source && <span className="tag">do seu {k.source.includes('/.codex/') ? 'Codex' : 'Claude Code'}</span>}
+                  <span className="muted small">{k.agents.length === 0 ? 'todos os agentes' : `${k.agents.length} ${k.agents.length === 1 ? 'agente' : 'agentes'}`}</span>
+                  <span className="small skill__desc">{k.description}</span>
+                </span>
+              </label>
+            )
+          })}
+        </div>
+      )}
     </Card>
   )
 }

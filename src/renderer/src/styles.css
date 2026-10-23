@@ -3601,3 +3601,71 @@ table.csv th {
 .onb-powers--tools .segmented {
   flex: none;
 }
+
+/* who uses a skill */
+.skill__use {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 10px;
+  padding: 12px;
+  border-radius: 10px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+}
+.agent-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: flex-start;
+}
+.agent-picker__list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.agent-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px 4px 5px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--text-2);
+  font-size: 12.5px;
+}
+.agent-pill.is-on {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--text);
+}
+.agent-pill .icon {
+  color: var(--accent);
+}
+.checks--skills {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+.check--skill {
+  align-items: flex-start;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+}
+.check--skill:last-child {
+  border-bottom: 0;
+}
+.check--skill > span {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.check--skill .skill__desc {
+  flex-basis: 100%;
+}
+.check--skill input {
+  margin-top: 3px;
+}

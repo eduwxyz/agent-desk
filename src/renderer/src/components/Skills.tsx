@@ -105,6 +105,14 @@ function LocalSkills(): ReactNode {
   const skills = useStore((s) => s.skills)
   const [found, setFound] = useState<LocalSkill[] | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [picking, setPicking] = useState<{ source: string; agents: string[] } | null>(null)
+  const link = (): void => {
+    if (!picking) return
+    linkSkill(picking.source, picking.agents).then(
+      () => setPicking(null),
+      (e: unknown) => setError(e instanceof Error ? e.message.replace(/^Error invoking.*?: /, '') : String(e))
+    )
+  }
   useEffect(() => {
     void localSkills().then(setFound, () => setFound([]))
   }, [])
@@ -133,14 +141,30 @@ function LocalSkills(): ReactNode {
                     <Icon name="terminal" size={12} /> Tem scripts: só roda com um agente que tenha computador (Linux ou este Mac).
                   </span>
                 )}
+                {picking?.source === l.source && (
+                  <div className="skill__use">
+                    <span className="small">Quem usa esta skill?</span>
+                    <AgentPicker value={picking.agents} onChange={(agents) => setPicking({ ...picking, agents })} />
+                    <div className="row">
+                      <button className="btn btn--sm btn--primary" onClick={link}>
+                        Usar
+                      </button>
+                      <button className="btn btn--sm btn--ghost" onClick={() => setPicking(null)}>
+                        Cancelar
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
               <div className="memory__actions">
                 {linked ? (
                   <span className="tag tag--ok">em uso</span>
                 ) : (
-                  <button className="btn btn--sm" onClick={() => linkSkill(l.source).catch((e: unknown) => setError(e instanceof Error ? e.message.replace(/^Error invoking.*?: /, '') : String(e)))}>
-                    Usar
-                  </button>
+                  picking?.source !== l.source && (
+                    <button className="btn btn--sm" onClick={() => setPicking({ source: l.source, agents: [] })}>
+                      Usar
+                    </button>
+                  )
                 )}
               </div>
             </div>
@@ -148,6 +172,43 @@ function LocalSkills(): ReactNode {
         })}
       </div>
     </section>
+  )
+}
+
+// Who uses a skill: every agent, or the ones picked (always at least one;
+// an empty list means everyone).
+export function AgentPicker({ value, onChange }: { value: string[]; onChange: (ids: string[]) => void }): ReactNode {
+  const agents = useStore((s) => s.agents.filter((a) => !a.archived))
+  const everyone = value.length === 0
+  const toggle = (id: string): void => {
+    const next = value.includes(id) ? value.filter((x) => x !== id) : [...value, id]
+    if (next.length) onChange(next)
+  }
+  return (
+    <div className="agent-picker">
+      <div className="segmented">
+        <button type="button" className={everyone ? 'is-active' : ''} onClick={() => onChange([])}>
+          Todos os agentes
+        </button>
+        <button type="button" className={everyone ? '' : 'is-active'} onClick={() => everyone && onChange(agents.map((a) => a.id))}>
+          Só alguns
+        </button>
+      </div>
+      {!everyone && (
+        <div className="agent-picker__list">
+          {agents.map((a) => {
+            const on = value.includes(a.id)
+            return (
+              <button key={a.id} type="button" className={`agent-pill ${on ? 'is-on' : ''}`} title={on && value.length === 1 ? 'Pelo menos um agente usa a skill' : undefined} onClick={() => toggle(a.id)}>
+                <AgentAvatar agent={a} size={18} />
+                {a.name}
+                {on && <Icon name="check" size={12} />}
+              </button>
+            )
+          })}
+        </div>
+      )}
+    </div>
   )
 }
 
@@ -166,16 +227,25 @@ function Agents({ ids }: { ids: string[] }): ReactNode {
 }
 
 function SkillRow({ skill: k, onEdit }: { skill: Skill; onEdit: () => void }): ReactNode {
-  const [open, setOpen] = useState<'body' | 'history' | null>(null)
+  const [open, setOpen] = useState<'body' | 'history' | 'agents' | null>(null)
+  const setAgents = (agents: string[]): void => void saveSkill({ id: k.id, name: k.name, description: k.description, body: k.body, agents, source: k.source })
   return (
     <div className="table__row skill">
       <div className="grow memory__body">
         <div className="row row--center">
           <strong>{k.name}</strong>
           <Agents ids={k.agents} />
+          <button className="link small" onClick={() => setOpen(open === 'agents' ? null : 'agents')}>
+            {open === 'agents' ? 'pronto' : 'mudar'}
+          </button>
           {k.source ? <span className="tag" title={k.source}>do seu {k.source.includes('/.codex/') ? 'Codex' : 'Claude Code'}</span> : <span className="muted small">· mudou {time(k.updatedAt)}</span>}
         </div>
         <span className="small">{k.description}</span>
+        {open === 'agents' && (
+          <div className="skill__use">
+            <AgentPicker value={k.agents} onChange={setAgents} />
+          </div>
+        )}
         {open === 'body' && <pre className="skill__body">{k.body}</pre>}
         {open === 'history' && <History skill={k} />}
       </div>
@@ -295,10 +365,8 @@ function Diff({ before, after }: { before: string; after: string }): ReactNode {
 }
 
 function SkillForm({ draft, onChange, onClose }: { draft: SkillInput; onChange: (d: SkillInput) => void; onClose: () => void }): ReactNode {
-  const agents = useStore((s) => s.agents.filter((a) => !a.archived))
   const [error, setError] = useState<string | null>(null)
   const set = (patch: Partial<SkillInput>): void => onChange({ ...draft, ...patch })
-  const toggle = (id: string): void => set({ agents: draft.agents.includes(id) ? draft.agents.filter((x) => x !== id) : [...draft.agents, id] })
   const save = (): void => {
     setError(null)
     saveSkill(draft).then(onClose, (e: unknown) => setError(e instanceof Error ? e.message.replace(/^Error invoking.*?: /, '') : String(e)))
@@ -323,17 +391,8 @@ function SkillForm({ draft, onChange, onClose }: { draft: SkillInput; onChange: 
             <textarea rows={10} className="mono" value={draft.body} onChange={(e) => set({ body: e.target.value })} />
           </Field>
         )}
-        <Field label="Pra quem">
-          <div className="row row--center skill__pick">
-            <button type="button" className={`chip ${draft.agents.length === 0 ? 'is-on' : ''}`} onClick={() => set({ agents: [] })}>
-              Todos
-            </button>
-            {agents.map((a) => (
-              <button key={a.id} type="button" className={`chip ${draft.agents.includes(a.id) ? 'is-on' : ''}`} onClick={() => toggle(a.id)}>
-                {a.name}
-              </button>
-            ))}
-          </div>
+        <Field label="Quem usa">
+          <AgentPicker value={draft.agents} onChange={(agents) => set({ agents })} />
         </Field>
         <div className="row row--between">
           <span className="hint">{draft.id ? 'A versão de agora fica no histórico: dá pra voltar.' : ''}</span>
