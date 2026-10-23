@@ -1,22 +1,148 @@
 # agent-desk
 
-App desktop (Electron) onde você conversa com um time de agentes de IA em canais e DMs, com governança de verdade: cada agente só enxerga as ferramentas que recebeu, toda ação sensível vira um pedido de aprovação amarrado à ação exata, e todo turno tem recibo.
+**Um time de agentes de IA no seu Mac.** Você conversa com eles em canais, como num chat do trabalho: eles pesquisam, escrevem, programam, usam as ferramentas da sua empresa (Jira, GitLab, Slack, Figma, Linear… via MCP) e você decide até onde cada um vai.
 
-Os agentes rodam nas CLIs que você já usa, com a sua assinatura: [Claude Code](https://code.claude.com) (`claude`) e [Codex](https://github.com/openai/codex) (`codex`). Sem chave de API e sem cobrança por uso. O app nunca vê nem guarda suas credenciais.
+- **Roda na assinatura que você já tem:** os agentes pensam com o [Claude Code](https://code.claude.com) ou o [Codex](https://github.com/openai/codex) instalados no seu Mac. Sem chave de API, sem cobrança por uso, e o app nunca vê a sua senha.
+- **Você no controle:** cada agente só enxerga as ferramentas que recebeu, e ações sensíveis (merge, publicar, enviar, apagar) viram um pedido de aprovação amarrado à ação exata, que também chega no celular.
+- **Tudo fica no seu Mac:** conversas, memória e logins. Nada passa por servidor nosso.
 
-Status: **M14, navegador.** Agentes respondem em canais e DMs pelo Claude Code ou pelo Codex, com streaming, recibos e limite de tokens por agente. Sem menção, um router escolhe quem responde; agentes passam a vez uns pros outros com @menção e podem te fazer perguntas. Todo agente pesquisa na web e lê páginas pela ferramenta do próprio motor. Conectores MCP (remotos com OAuth ou token, e locais via stdio) entram por um gateway: cada agente só vê as ferramentas que recebeu, e ações sensíveis viram pedidos de aprovação amarrados à chamada exata. Cada conversa ganha um resumo do que saiu da janela, e os agentes guardam memórias sobre você e sobre o próprio trabalho, que você vê, aprova, edita e esquece numa tela própria. Cada agente pode ganhar um computador Linux próprio (um container Docker), onde instala, cria, roda serviços e tira prints sem pedir permissão; o que ele mostra abre num painel ao lado da conversa. Dá pra emprestar pastas do Mac pro computador do agente trabalhar num projeto existente, e ligar um canal a um projeto: todo agente do canal recebe os arquivos de contexto (CLAUDE.md, AGENTS.md…) e a memória do projeto. Precisa do Docker Desktop. Ou, por escolha sua e agente por agente, o computador dele pode ser o seu próprio Mac: ele usa o que você tem instalado, com um selo em cada mensagem. Um agente também pode ter um navegador só dele (um Chrome com logins próprios): abre páginas, clica, escreve e lê como uma pessoa, você acompanha a tela ao vivo e assume quando precisa entrar numa conta, e clique que compra, publica ou apaga pede aprovação. Rotinas fazem um agente trabalhar sozinho em dias e horários marcados: o pedido e a resposta aparecem na conversa, e chega uma notificação. Nada roda solto de madrugada: um agente em loop é avisado e parado, um travado é encerrado, e uma resposta que passa do teto de gasto pausa e pergunta se continua. A conversa vai em blocos que a próxima resposta lê do cache, e o cache conta 10% no limite. Rotinas também rodam quando aparece algo novo num conector (uma issue no Linear) ou quando um script do Mac chama. Os agentes seguem skills (receitas) e propõem novas, que você aprova com diff. Aprovações e perguntas chegam no Telegram, com botões. Os agentes publicam branches agent/* e abrem PRs (por aprovação) sem nunca ver o token do GitHub; um boletim mostra como cada agente e skill está indo e quanto custou cada issue. Pra instalar em /Applications: `npm run install-app` (macOS, Apple Silicon). Spec do MVP em [`docs/spec-mvp.md`](docs/spec-mvp.md).
+![Uma conversa: o agente investigou o bug, rodou os testes e pede aprovação pra abrir a MR](docs/images/conversa.png)
 
-## Instalar
+## O que dá pra fazer
 
-Mac com chip Apple (M1 em diante), com o Claude Code ou o Codex instalado e logado. No Terminal:
+- **Canais e DMs** com vários agentes; eles se chamam com @menção e passam a vez entre si. Sem menção, um router escolhe quem responde.
+- **Trabalho visível:** cada passo (pesquisou, leu, rodou, editou) aparece na conversa, com recibo de tokens e tempo.
+- **Conectores MCP** (remotos com OAuth ou token, e locais), com acesso por agente: sem acesso, ler, ou ler e escrever.
+- **Computador do agente:** um Linux isolado (Docker) onde ele instala, roda e testa; ou, por escolha sua, o seu próprio Mac.
+- **Navegador do agente:** um Chrome só dele, que você acompanha ao vivo e assume quando precisa entrar numa conta.
+- **Projetos:** um canal ligado a uma pasta do Mac; todo agente do canal recebe o `CLAUDE.md`/`AGENTS.md` e a memória do projeto.
+- **Memória** que você vê, aprova, edita e esquece. **Rotinas** em dia e hora marcados ou quando aparece algo novo num conector. **Skills** (receitas) que os agentes seguem e propõem.
+- **Limites por agente**, teto por resposta, "Pausar tudo", boletim com o custo de cada issue e aprovações pelo **Telegram**.
+- Funciona com o **gateway de IA da sua empresa** (proxy), se o seu Claude Code ou Codex já usa um.
+
+## Instalar no Mac
+
+### O que você precisa
+
+| | |
+|---|---|
+| **Mac** | Com chip Apple (M1, M2, M3, M4…). Macs com Intel ainda não são suportados. Testado no macOS 26. |
+| **Um motor** | O **Claude Code** (assinatura Claude Pro ou Max, ou o login da sua empresa) **ou** o **Codex** (assinatura ChatGPT Plus, Pro ou Business). Basta um; dá pra usar os dois. |
+| **Opcional** | **Docker Desktop**, pra dar um computador Linux isolado aos agentes. **Google Chrome**, pro navegador dos agentes (sem ele, o app usa o navegador embutido). |
+
+### Passo 1 · Instale e entre no Claude Code (ou no Codex)
+
+**Claude Code.** No Terminal (⌘ + espaço, digite "Terminal"):
+
+```bash
+curl -fsSL https://claude.ai/install.sh | bash
+claude auth login
+```
+
+O segundo comando abre o navegador pra você entrar com a sua conta. Confira com `claude --version`.
+
+**Codex** (se for usar). Precisa do [Node.js](https://nodejs.org) instalado:
+
+```bash
+npm install -g @openai/codex
+```
+
+O login do Codex é feito **dentro do agent-desk** (passo 3), porque o app roda o Codex com uma configuração própria, separada da sua.
+
+### Passo 2 · Instale o agent-desk
+
+Cole no Terminal:
 
 ```bash
 curl -fsSL https://github.com/eduwxyz/agent-desk/releases/latest/download/install.sh | sh
 ```
 
-Instala em Aplicativos e abre; pra atualizar, rode de novo. Também tem o `.dmg` em [Releases](https://github.com/eduwxyz/agent-desk/releases): como o app não tem certificado da Apple, na primeira vez o macOS bloqueia e você libera em **Ajustes do Sistema → Privacidade e Segurança → Abrir Mesmo Assim**. Baixado pelo Terminal, o arquivo não recebe a marca de "veio da internet", e esse passo não existe.
+O comando baixa a última versão, coloca o app em **Aplicativos** e abre. Como o arquivo vem pelo Terminal, o macOS abre o app direto, sem aviso.
 
-## Rodar
+<details>
+<summary>Prefere baixar o .dmg pelo navegador?</summary>
+
+1. Baixe o `agent-desk-mac-arm64.dmg` em [Releases](https://github.com/eduwxyz/agent-desk/releases/latest) e arraste o agent-desk pra **Aplicativos**.
+2. Abra o app. Como ele não tem certificado da Apple, o macOS bloqueia na primeira vez com "não pode ser aberto". Clique em **OK**.
+3. Vá em **Ajustes do Sistema → Privacidade e Segurança**, role até o aviso sobre o agent-desk e clique em **Abrir Mesmo Assim**. Confirme com a sua senha.
+
+Só na primeira vez; depois ele abre normalmente.
+</details>
+
+### Passo 3 · A primeira abertura
+
+O app abre com uma introdução de 6 passos:
+
+1. **Seu nome.**
+2. **O motor:** o app confere se o Claude Code e o Codex estão prontos. Se faltar algo, mostra o comando ou o botão **Entrar** (no Codex, abre o Terminal pra você fazer o login) e confere de novo sozinho.
+3. **Sobre você:** o que todo agente deve saber (seu trabalho, como gosta das respostas).
+4. **O primeiro agente:** a partir de um modelo (Pesquisa, Engenharia, Conteúdo, Assistente ou do zero).
+5. **O que ele pode usar:** web, navegador e computador.
+6. **A primeira tarefa:** o app cria o canal #geral e você já vê o agente trabalhando.
+
+![Criando o primeiro agente, com prévia ao vivo](docs/images/primeiro-agente.png)
+
+Na primeira vez que o app guardar uma senha de conector, o macOS pergunta se o agent-desk pode usar as **Chaves**: clique em **Sempre permitir**.
+
+Depois da introdução, a lista **Primeiros passos**, na barra lateral, leva você pelos outros recursos: montar um time, conectar uma ferramenta, ensinar algo pra memória, agendar uma rotina, ligar um projeto, aprovar pelo celular.
+
+### Passo 4 · Conecte as ferramentas da sua empresa (opcional)
+
+Em **Conectores → Adicionar**, cole o endereço do servidor MCP da ferramenta (Jira, GitLab, Slack, Figma, Linear, Notion…). Os que usam OAuth abrem o navegador pra você autorizar; os outros pedem um token. Depois, na página de cada agente, escolha o acesso dele a cada conector: **Sem acesso**, **Ler** ou **Ler e escrever**.
+
+Ferramentas sensíveis (apagar, merge, publicar, enviar) sempre viram um pedido de aprovação na conversa, a não ser as que você marcar como "sempre permitir".
+
+### Usando o gateway de IA da empresa
+
+Se no trabalho o seu Claude Code ou Codex manda os pedidos por um proxy da empresa, o agent-desk usa o mesmo caminho, sem configuração extra:
+
+- **Claude Code:** o app lê do seu `~/.claude/settings.json` só o bloco `env` (por exemplo `ANTHROPIC_BASE_URL` e o token) e o `apiKeyHelper`. Hooks, plugins e permissões continuam de fora.
+- **Codex:** o app lê do seu `~/.codex/config.toml` o `model_provider` e a tabela `[model_providers.*]`, e pega do seu shell a variável com a chave (o `env_key`).
+
+Em **Configurações**, o motor aparece como "Gateway …". Se o gateway dá nomes próprios aos modelos, escolha **Outro modelo** na página do agente e digite o nome exato.
+
+## Atualizar
+
+Rode o mesmo comando do passo 2. Ele fecha o app aberto (depois que as respostas em andamento terminam), troca pela versão nova e abre de novo. Seus agentes, conversas e conectores continuam onde estavam.
+
+## Onde ficam os seus dados
+
+Tudo em `~/Library/Application Support/agent-desk/`: o banco (`agent-desk.db`), um backup por dia em `backups/`, o computador de cada agente e os arquivos que eles mostram. Senhas e tokens dos conectores são criptografados pelas Chaves do macOS antes de chegar ao banco.
+
+## Desinstalar
+
+1. Feche o app (⌘Q).
+2. Apague `/Applications/agent-desk.app`.
+3. Se quiser apagar também os dados: `rm -rf ~/Library/Application\ Support/agent-desk`.
+4. Se usou o computador Linux, apague os containers `agentdesk-*` no Docker Desktop.
+5. Se quiser, apague o item **agent-desk Safe Storage** no app Acesso às Chaves.
+
+## Problemas comuns
+
+**"agent-desk não pode ser aberto porque a Apple não pode verificar…"**
+Você baixou o `.dmg` pelo navegador. Siga o passo 3 do quadro do `.dmg`, ou instale pelo comando do passo 2, que não tem esse aviso.
+
+**O Claude Code aparece como "não instalado".**
+O app procura o `claude` no mesmo `PATH` do seu Terminal. Rode `which claude` no Terminal: se não aparecer nada, a instalação não terminou. Se aparecer, feche o app (⌘Q) e abra de novo.
+
+**O Claude Code aparece como "não logado".**
+Rode `claude auth login` no Terminal e depois clique em **Verificar de novo** em Configurações.
+
+**O agente não responde e a mensagem diz que chegou no limite.**
+Cada agente tem um limite mensal de tokens. Aumente na página dele, em **Limite mensal**, ou veja o uso em **Uso e limites**.
+
+**"O Docker não está rodando" ao ligar o computador Linux.**
+Instale e abra o [Docker Desktop](https://www.docker.com/products/docker-desktop/). Sem ele, escolha **Nenhum** ou **Este Mac** como computador do agente.
+
+**Um conector aparece como "precisa autorizar".**
+Clique em **Autorizar no navegador** (na página do agente ou em Conectores) e faça o login na ferramenta.
+
+**O macOS pergunta pelas Chaves a cada versão nova.**
+Como o app não tem certificado da Apple, cada versão tem uma assinatura nova. Clique em **Sempre permitir** uma vez por versão.
+
+## Desenvolvimento
+
+### Rodar a partir do código
 
 
 Precisa do Node 24+ e de pelo menos uma das CLIs instalada e logada na sua assinatura:
@@ -38,7 +164,7 @@ npm run dev
 
 Os dados ficam em `~/Library/Application Support/agent-desk/agent-desk.db` (macOS).
 
-## Scripts
+### Scripts
 
 | Comando | O que faz |
 |---|---|
@@ -49,7 +175,7 @@ Os dados ficam em `~/Library/Application Support/agent-desk/agent-desk.db` (macO
 | `npm test` | Testes do núcleo (parsers das CLIs com saídas gravadas, contexto, runs, limites) |
 | `node scripts/screens.mjs <pasta> [--real]` | Abre o build com Playwright num banco temporário e salva screenshots. Usa motores falsos, ou as CLIs de verdade com `--real` |
 
-## Como funciona
+### Como funciona
 
 - **main** (Electron): janela e ciclo de vida.
 - **core** (utility process): SQLite, motores e runs. Nada de agente roda na janela.
