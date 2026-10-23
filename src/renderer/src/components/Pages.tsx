@@ -38,6 +38,7 @@ import {
   RUN_STALL_MINUTES,
   countedTokens,
   customModel,
+  MODELS,
   saveSkill,
   skillApplies,
   modelInfo,
@@ -134,8 +135,9 @@ export function AgentPage({ id }: { id?: string }): ReactNode {
   const custom = !models.some((m) => m.id === draft.modelId)
   const engine: EngineId = model?.engine ?? 'claude'
   const engineStatus = engines[engine]
+  const work = useStore((s) => s.settings.mode === 'work')
   const pickEngine = (e: EngineId): void => {
-    if (e !== engine) patch({ modelId: models.find((m) => m.engine === e)!.id })
+    if (e !== engine) patch({ modelId: work ? customModel(e, custom ? (model?.id ?? '') : '') : models.find((m) => m.engine === e)!.id })
   }
 
   return (
@@ -424,28 +426,34 @@ export function AgentPage({ id }: { id?: string }): ReactNode {
                 </button>
               </p>
             )}
-            <div className="models">
-              {models
-                .filter((m) => m.engine === engine)
-                .map((m) => (
-                  <label key={m.id} className={`model ${draft.modelId === m.id ? 'is-active' : ''}`}>
-                    <input type="radio" name="model" checked={draft.modelId === m.id} onChange={() => patch({ modelId: m.id })} />
-                    <strong>{m.label}</strong>
-                    <span className="muted small">{m.hint}</span>
-                  </label>
-                ))}
-              <div className={`model model--custom ${custom ? 'is-active' : ''}`} onClick={() => !custom && patch({ modelId: customModel(engine, '') })}>
-                <strong>Outro modelo</strong>
-                <input
-                  className="model__name"
-                  value={custom ? (model?.id ?? '') : ''}
-                  placeholder={engine === 'claude' ? 'ex.: claude-sonnet-4-5' : 'ex.: gpt-4.1'}
-                  spellCheck={false}
-                  onChange={(e) => patch({ modelId: customModel(engine, e.target.value) })}
-                />
-                <span className="muted small">O nome exato que o gateway da sua empresa usa.</span>
+            {work ? (
+              <Field label="Modelo" hint="O nome exato que o gateway da sua empresa dá ao modelo.">
+                <input className="model-name" value={custom ? (model?.id ?? '') : ''} placeholder={custom ? '' : `Hoje: ${model?.label ?? draft.modelId}`} spellCheck={false} onChange={(e) => patch({ modelId: customModel(engine, e.target.value) })} />
+              </Field>
+            ) : (
+              <div className="models">
+                {models
+                  .filter((m) => m.engine === engine)
+                  .map((m) => (
+                    <label key={m.id} className={`model ${draft.modelId === m.id ? 'is-active' : ''}`}>
+                      <input type="radio" name="model" checked={draft.modelId === m.id} onChange={() => patch({ modelId: m.id })} />
+                      <strong>{m.label}</strong>
+                      <span className="muted small">{m.hint}</span>
+                    </label>
+                  ))}
+                <div className={`model model--custom ${custom ? 'is-active' : ''}`} onClick={() => !custom && patch({ modelId: customModel(engine, '') })}>
+                  <strong>Outro modelo</strong>
+                  <input
+                    className="model__name"
+                    value={custom ? (model?.id ?? '') : ''}
+                    placeholder={engine === 'claude' ? 'ex.: claude-sonnet-4-5' : 'ex.: gpt-4.1'}
+                    spellCheck={false}
+                    onChange={(e) => patch({ modelId: customModel(engine, e.target.value) })}
+                  />
+                  <span className="muted small">O nome exato que o gateway da sua empresa usa.</span>
+                </div>
               </div>
-            </div>
+            )}
             <div className="grid2">
               <Field label="Esforço de raciocínio" hint="Mais esforço pensa mais e gasta mais do plano.">
                 <select value={draft.effort} onChange={(e) => patch({ effort: e.target.value as Agent['effort'] })}>
@@ -1247,6 +1255,36 @@ function AgentSkills({ agentId, name }: { agentId: string; name: string }): Reac
 // A model from the list, or any name a company gateway gives one ("Outro modelo"), kept as "<engine>:<name>".
 // With an empty value it asks for a choice (the introduction makes the person pick).
 export function ModelSelect({ value, onChange, jev, engines }: { value: string; onChange: (v: string) => void; jev?: boolean; engines?: EngineId[] }): ReactNode {
+  const work = useStore((s) => s.settings.mode === 'work')
+  if (work) return <GatewayModel value={value} onChange={onChange} engines={engines} />
+  return <ListedModel value={value} onChange={onChange} jev={jev} engines={engines} />
+}
+
+// At work: the gateway's name for the model, and on which engine (when there are two).
+export function GatewayModel({ value, onChange, engines }: { value: string; onChange: (v: string) => void; engines?: EngineId[] }): ReactNode {
+  const ready = useStore((s) => (Object.keys(ENGINES) as EngineId[]).filter((e) => s.settings.engines[e].installed))
+  const choices = engines ?? ready
+  const listed = MODELS.some((m) => m.id === value)
+  const m = listed ? undefined : modelInfo(value)
+  const engine = m?.engine ?? choices[0] ?? 'claude'
+  const name = m?.id ?? ''
+  return (
+    <div className="row gateway-model">
+      {choices.length > 1 && (
+        <select value={engine} onChange={(e) => onChange(customModel(e.target.value as EngineId, name))}>
+          {choices.map((e) => (
+            <option key={e} value={e}>
+              {ENGINES[e].label}
+            </option>
+          ))}
+        </select>
+      )}
+      <input className="model-name grow" value={name} placeholder={listed ? `Hoje: ${modelInfo(value)?.label ?? value}. Digite o nome do gateway` : 'O nome do modelo no gateway da empresa'} spellCheck={false} onChange={(e) => onChange(customModel(engine, e.target.value))} />
+    </div>
+  )
+}
+
+function ListedModel({ value, onChange, jev, engines }: { value: string; onChange: (v: string) => void; jev?: boolean; engines?: EngineId[] }): ReactNode {
   const models = useStore((s) => s.models.filter((m) => !engines || engines.includes(m.engine)))
   const listed = value === '' || value === 'jev' || models.some((m) => m.id === value)
   const custom = listed ? undefined : modelInfo(value)
@@ -1508,6 +1546,20 @@ export function SettingsPage(): ReactNode {
           <Field label="Contexto" hint="Entra em toda conversa de todo agente: quem você é, o que faz, o que importa agora e o que nunca fazer.">
             <textarea rows={5} value={settings.context} onChange={(e) => updateSettings({ context: e.target.value })} />
           </Field>
+          <Field label="Onde você usa" hint={settings.mode === 'work' ? 'Os modelos são escolhidos pelo nome do gateway da empresa; Telegram e GitHub ficam de fora.' : 'Na sua assinatura: modelos da lista, celular pelo Telegram e PRs no GitHub.'}>
+            <div className="segmented">
+              {(
+                [
+                  ['personal', 'Pra mim'],
+                  ['work', 'No trabalho']
+                ] as const
+              ).map(([v, label]) => (
+                <button key={v} className={(settings.mode ?? 'personal') === v ? 'is-active' : ''} onClick={() => updateSettings({ mode: v })}>
+                  {label}
+                </button>
+              ))}
+            </div>
+          </Field>
           <div className="row">
             <button className="btn btn--sm" onClick={() => updateSettings({ onboarding: { done: false } })}>
               Rever a introdução
@@ -1586,7 +1638,7 @@ export function SettingsPage(): ReactNode {
           )}
         </Card>
 
-        <PhoneCard info={settings.telegram} />
+        {settings.mode !== 'work' && <PhoneCard info={settings.telegram} />}
 
         <Card title="Memória" lead="Um modelo pequeno resume o que sai da janela de cada conversa e, do mesmo trecho, tira o que vale lembrar sobre você.">
           <div className="grid2">
@@ -1630,7 +1682,7 @@ export function SettingsPage(): ReactNode {
           </div>
         </Card>
 
-        <GithubCard info={settings.github} />
+        {settings.mode !== 'work' && <GithubCard info={settings.github} />}
 
         <TeamCard />
 

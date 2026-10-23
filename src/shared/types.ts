@@ -153,6 +153,9 @@ export interface Settings {
   quietHours?: { from: string; to: string } | null // "HH:MM": routines and triggers wait, and run late when it ends; null: off
   quota?: Quota // the Claude subscription's windows, from the last reply (spec §21)
   github?: { user?: string; error?: string } // computed: the GitHub account the app pushes and opens PRs with (spec §22)
+  // Where the app is used: 'work' (a company's gateway and tools) shows only the model-name field
+  // where the defaults would be, and leaves out the personal Telegram and GitHub. Unset: personal.
+  mode?: 'personal' | 'work'
   // The first-run introduction: unset on an existing install (no intro), done:false to show it (a new install, or "Rever a introdução")
   onboarding?: { done: boolean; checklistHidden?: boolean }
 }

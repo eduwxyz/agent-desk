@@ -3669,3 +3669,36 @@ table.csv th {
 .check--skill input {
   margin-top: 3px;
 }
+.onb-modes {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+.onb-mode {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 14px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  text-align: left;
+  font-size: 12.5px;
+  color: var(--text-2);
+  line-height: 1.4;
+}
+.onb-mode strong {
+  font-size: 14px;
+  color: var(--text);
+}
+.onb-mode .icon {
+  color: var(--accent);
+  margin-bottom: 4px;
+}
+.onb-mode.is-active {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.gateway-model select {
+  flex: 0 0 150px;
+}

@@ -73,7 +73,7 @@ Só na primeira vez; depois ele abre normalmente.
 
 O app abre com uma introdução que também é a configuração:
 
-1. **Seu nome.**
+1. **Seu nome e onde você vai usar:** **Pra mim** (sua assinatura: lista de modelos, celular pelo Telegram, PRs no GitHub) ou **No trabalho** (gateway e ferramentas da empresa: você digita o nome dos modelos do gateway, e Telegram e GitHub ficam de fora). Dá pra trocar depois em Configurações.
 2. **O motor:** o app confere se o Claude Code e o Codex estão prontos. Se faltar algo, mostra o comando ou o botão **Entrar** (no Codex, abre o Terminal pra você fazer o login) e confere de novo sozinho.
 3. **Os modelos (obrigatório):** qual modelo decide quem responde nos canais e qual cuida da memória. Se você usa o gateway da empresa, escolha **Outro modelo…** e digite o nome que o gateway usa.
 4. **Sobre você:** o que todo agente deve saber (seu trabalho, como gosta das respostas).
@@ -102,7 +102,7 @@ Se no trabalho o seu Claude Code ou Codex manda os pedidos por um proxy da empre
 - **Claude Code:** o app lê do seu `~/.claude/settings.json` só o bloco `env` (por exemplo `ANTHROPIC_BASE_URL` e o token) e o `apiKeyHelper`. Hooks, plugins e permissões continuam de fora.
 - **Codex:** o app lê do seu `~/.codex/config.toml` o `model_provider` e a tabela `[model_providers.*]`, e pega do seu shell a variável com a chave (o `env_key`).
 
-Em **Configurações**, o motor aparece como "Gateway …". Se o gateway dá nomes próprios aos modelos, escolha **Outro modelo** e digite o nome exato: na página de cada agente, e em Configurações, no **Router** e na **Memória**.
+Em **Configurações**, o motor aparece como "Gateway …", e o app já sugere o modo **No trabalho**: nele, onde estaria a lista de modelos (Sonnet, Opus…) fica só o campo pro nome que o gateway usa, na página de cada agente e em Configurações (**Router** e **Memória**). No modo **Pra mim**, o mesmo campo aparece em **Outro modelo…**.
 
 ## Atualizar
 

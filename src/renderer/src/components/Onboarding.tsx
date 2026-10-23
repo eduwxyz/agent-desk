@@ -146,7 +146,7 @@ const readyModels = (engines: State['settings']['engines']): typeof MODELS => MO
 
 // A template fills in who the agent is; the model stays if it still works.
 function fromTemplate(a: Agent, t: Template, models: typeof MODELS): Agent {
-  const model = models.find((m) => m.id === a.modelId) ?? models[0]
+  const model = MODELS.some((m) => m.id === a.modelId) ? (models.find((m) => m.id === a.modelId) ?? models[0]) : modelInfo(a.modelId) ? { id: a.modelId } : models[0]
   return { ...a, name: t.name, role: t.role, color: t.color, instructions: t.instructions, modelId: model?.id ?? a.modelId, web: true }
 }
 
@@ -182,11 +182,20 @@ export function Onboarding(): ReactNode {
   const patch = (p: Partial<Agent>): void => setAgent((a) => ({ ...a, ...p }))
   const close = (): void => updateSettings({ onboarding: { done: true } })
 
+  // A company gateway in the user's config means work, unless they already chose.
+  const gateway = (Object.keys(ENGINES) as EngineId[]).some((e) => settings.engines[e].account?.startsWith('Gateway'))
+  useEffect(() => {
+    if (gateway && !settings.mode) updateSettings({ mode: 'work' })
+  }, [gateway, settings.mode])
+  const work = settings.mode === 'work'
+
   // The first engine that works sets the model; a template keeps it.
   useEffect(() => {
-    if (models.length && !models.some((m) => m.id === agent.modelId)) patch({ modelId: models[0]!.id })
+    if (work) {
+      if (MODELS.some((m) => m.id === agent.modelId)) patch({ modelId: customModel(ready[0] ?? 'claude', '') }) // at work the gateway names the model
+    } else if (models.length && !models.some((m) => m.id === agent.modelId)) patch({ modelId: models[0]!.id })
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [models.map((m) => m.id).join()])
+  }, [models.map((m) => m.id).join(), work])
 
   const pick = (t: Template): void => {
     setTemplate(t)
@@ -242,7 +251,7 @@ export function Onboarding(): ReactNode {
           {step === 'tools' && <Tools onBack={back} onNext={next} />}
           {step === 'skills' && <SkillsStep picked={skills} setPicked={setSkills} onBack={back} onNext={next} />}
           {step === 'agent' && (
-            <MakeAgent agent={agent} handle={handle} template={template} pick={pick} patch={patch} models={models} ready={ready} computer={computer} onBack={back} onNext={next} />
+            <MakeAgent agent={agent} handle={handle} template={template} pick={pick} patch={patch} models={work ? [] : models} ready={ready} computer={computer} onBack={back} onNext={next} />
           )}
           {step === 'powers' && <Powers agent={agent} handle={handle} patch={patch} computer={computer} setComputer={setComputer} grants={grants} setGrants={setGrants} onBack={back} onNext={next} />}
           {step === 'first' && <FirstTask agent={agent} handle={handle} computer={computer} channel={unique('geral', channels)} tasks={tasks} task={task} setTask={setTask} busy={busy} onBack={back} onFinish={() => void finish()} />}
@@ -272,6 +281,7 @@ function Nav({ onBack, onNext, next = 'Continuar', disabled }: { onBack?: () => 
 // ---------- 1. welcome ----------
 
 function Welcome({ name, setName, onNext }: { name: string; setName: (v: string) => void; onNext: () => void }): ReactNode {
+  const mode = useStore((s) => s.settings.mode ?? 'personal')
   return (
     <div className="onb__split">
       <section className="onb__main">
@@ -293,6 +303,23 @@ function Welcome({ name, setName, onNext }: { name: string; setName: (v: string)
           <span>Como os agentes devem te chamar?</span>
           <input autoFocus value={name} placeholder="Seu nome" onChange={(e) => setName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && name.trim() && onNext()} />
         </label>
+        <div className="onb__field">
+          <span>Onde você vai usar?</span>
+          <div className="onb-modes">
+            {(
+              [
+                ['personal', 'laptop', 'Pra mim', 'Na sua assinatura do Claude ou do ChatGPT. Inclui o celular pelo Telegram e PRs no GitHub.'],
+                ['work', 'shield', 'No trabalho', 'Com o gateway de IA e as ferramentas da empresa: você usa os modelos pelo nome que o gateway dá, e Telegram e GitHub ficam de fora.']
+              ] as const
+            ).map(([v, icon, title, text]) => (
+              <button key={v} className={`onb-mode ${mode === v ? 'is-active' : ''}`} onClick={() => updateSettings({ mode: v })}>
+                <Icon name={icon} size={18} />
+                <strong>{title}</strong>
+                <span>{text}</span>
+              </button>
+            ))}
+          </div>
+        </div>
         <Nav onNext={onNext} next="Começar" disabled={!name.trim()} />
       </section>
       <aside className="onb__aside">
@@ -439,6 +466,7 @@ function Copy({ text }: { text: string }): ReactNode {
 
 function Models(p: { ready: EngineId[]; router: string; setRouter: (v: string) => void; memory: string; setMemory: (v: string) => void; onBack: () => void; onNext: () => void }): ReactNode {
   const engines = useStore((s) => s.settings.engines)
+  const work = useStore((s) => s.settings.mode === 'work')
   const gateway = p.ready.some((e) => engines[e].account?.startsWith('Gateway'))
   const ok = (v: string): boolean => !!usable(modelInfo(v))
   return (
@@ -446,10 +474,16 @@ function Models(p: { ready: EngineId[]; router: string; setRouter: (v: string) =
       <span className="onb__kicker">Passo 2 · Os modelos</span>
       <h1>Quem decide e quem lembra.</h1>
       <p className="onb__lead">Dois trabalhos pequenos rodam o tempo todo, fora dos agentes. Escolha um modelo rápido pra cada um; dá pra trocar depois em Configurações.</p>
-      {gateway && (
+      {work ? (
         <p className="onb-note">
-          <Icon name="zap" size={14} /> Você usa o gateway da sua empresa: escolha <b>Outro modelo…</b> e digite o nome que o gateway dá ao modelo.
+          <Icon name="zap" size={14} /> Digite o nome que o gateway da sua empresa dá a cada modelo.
         </p>
+      ) : (
+        gateway && (
+          <p className="onb-note">
+            <Icon name="zap" size={14} /> Você usa o gateway da sua empresa: escolha <b>Outro modelo…</b> e digite o nome que o gateway dá ao modelo.
+          </p>
+        )
       )}
       <div className="onb-pair">
         <div className="onb-pick">
@@ -705,10 +739,12 @@ function MakeAgent(p: {
                 <span>{m.hint}</span>
               </button>
             ))}
-            <button className={`onb-model ${custom ? 'is-active' : ''}`} onClick={() => !custom && patch({ modelId: customModel(p.ready[0] ?? 'claude', '') })}>
-              <strong>Outro modelo</strong>
-              <span>O nome do gateway</span>
-            </button>
+            {p.models.length > 0 && (
+              <button className={`onb-model ${custom ? 'is-active' : ''}`} onClick={() => !custom && patch({ modelId: customModel(p.ready[0] ?? 'claude', '') })}>
+                <strong>Outro modelo</strong>
+                <span>O nome do gateway</span>
+              </button>
+            )}
           </div>
           {custom && (
             <div className="onb__row onb-custom">
@@ -1034,11 +1070,13 @@ const ITEMS: Item[] = [
 ]
 
 export function GettingStarted(): ReactNode {
-  const done = useStore((s) => ITEMS.map((i) => i.done(s)))
+  const work = useStore((s) => s.settings.mode === 'work')
+  const items = work ? ITEMS.filter((i) => i.id !== 'phone') : ITEMS // a company won't take approvals over a personal Telegram
+  const done = useStore((s) => items.map((i) => i.done(s)))
   const onboarding = useStore((s) => s.settings.onboarding)
   const [open, setOpen] = useState(false)
   const count = done.filter(Boolean).length
-  const all = count === ITEMS.length
+  const all = count === items.length
   const nextIndex = done.indexOf(false)
 
   return (
@@ -1049,7 +1087,7 @@ export function GettingStarted(): ReactNode {
             <div>
               <strong>{all ? 'Você conhece o agent-desk inteiro' : 'Primeiros passos'}</strong>
               <span className="muted small">
-                {count} de {ITEMS.length} · cada um se marca sozinho quando você usa
+                {count} de {items.length} · cada um se marca sozinho quando você usa
               </span>
             </div>
             <button className="icon-btn icon-btn--sm" title="Fechar" onClick={() => setOpen(false)}>
@@ -1057,7 +1095,7 @@ export function GettingStarted(): ReactNode {
             </button>
           </div>
           <ol className="getting__list">
-            {ITEMS.map((item, i) => (
+            {items.map((item, i) => (
               <li key={item.id} className={`${done[i] ? 'is-done' : ''} ${i === nextIndex ? 'is-next' : ''}`}>
                 <span className="getting__check">{done[i] && <Icon name="check" size={12} />}</span>
                 <div className="grow">
@@ -1090,11 +1128,11 @@ export function GettingStarted(): ReactNode {
         <span className="getting__label">
           <Icon name={all ? 'check' : 'spark'} size={14} /> Primeiros passos
           <span className="muted">
-            {count}/{ITEMS.length}
+            {count}/{items.length}
           </span>
         </span>
         <span className="getting__track">
-          <span style={{ width: `${(count / ITEMS.length) * 100}%` }} />
+          <span style={{ width: `${(count / items.length) * 100}%` }} />
         </span>
       </button>
     </div>
