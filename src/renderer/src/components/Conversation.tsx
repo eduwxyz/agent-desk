@@ -4,6 +4,7 @@ import remarkGfm from 'remark-gfm'
 import {
   agentById,
   conversationTitle,
+  openDialog,
   decideApproval,
   decideMemory,
   describeSchedule,
@@ -41,7 +42,8 @@ export function ConversationView({ id }: { id: string }): ReactNode {
   const members = useStore((s) => (conv ? conv.members.map((m) => agentById(s, m)).filter((a): a is Agent => !!a) : []))
   const messages = useStore((s) => s.messages.filter((m) => m.conversationId === id))
   const [showSummary, setShowSummary] = useState(false)
-  const [showProject, setShowProject] = useState(false)
+  const showProject = useStore((s) => s.dialog?.kind === 'project' && s.dialog.id === id)
+  const setShowProject = (on: boolean): void => openDialog(on ? { kind: 'project', id } : null)
 
   if (!conv) return <div className="empty">Conversa não encontrada.</div>
   const dmAgent = conv.kind === 'dm' ? members[0] : undefined
@@ -66,6 +68,9 @@ export function ConversationView({ id }: { id: string }): ReactNode {
                   </button>
                 ))}
                 <span className="stack__count">{members.length} agente{members.length === 1 ? '' : 's'}</span>
+                <button className="icon-btn stack__add" title="Adicionar ou remover agentes" onClick={() => openDialog({ kind: 'members', id })}>
+                  <Icon name="plus" size={14} />
+                </button>
               </div>
             )}
             {conv.kind === 'channel' && (
@@ -87,7 +92,7 @@ export function ConversationView({ id }: { id: string }): ReactNode {
         {showProject && <ProjectPanel conv={conv} members={members} onClose={() => setShowProject(false)} />}
         {showSummary && <SummaryPanel conv={conv} messages={messages} onClose={() => setShowSummary(false)} />}
 
-        <MessageList messages={messages} conversationId={id} />
+        <MessageList messages={messages} conversationId={id} empty={conv.kind === 'channel' && members.length === 0} />
         <Composer conversationId={id} members={members} placeholder={dmAgent ? `Mensagem para ${dmAgent.name}` : `Mensagem em #${title}`} />
       </section>
       <SidePanel />
@@ -95,7 +100,7 @@ export function ConversationView({ id }: { id: string }): ReactNode {
   )
 }
 
-function MessageList({ messages, conversationId }: { messages: Message[]; conversationId: string }): ReactNode {
+function MessageList({ messages, conversationId, empty }: { messages: Message[]; conversationId: string; empty?: boolean }): ReactNode {
   const ref = useRef<HTMLDivElement>(null)
   const stick = useRef(true)
 
@@ -107,6 +112,21 @@ function MessageList({ messages, conversationId }: { messages: Message[]; conver
     const el = ref.current
     if (el && stick.current) el.scrollTop = el.scrollHeight
   })
+
+  if (messages.length === 0 && empty) {
+    return (
+      <div className="messages messages--empty">
+        <div className="empty">
+          <Icon name="users" size={22} />
+          <p>Nenhum agente neste canal ainda.</p>
+          <p className="muted">Quem está no canal lê a conversa e pode responder.</p>
+          <button className="btn btn--primary btn--sm" onClick={() => openDialog({ kind: 'members', id: conversationId })}>
+            <Icon name="plus" size={14} /> Adicionar agentes
+          </button>
+        </div>
+      </div>
+    )
+  }
 
   if (messages.length === 0) {
     return (

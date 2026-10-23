@@ -1,14 +1,20 @@
-import { useState, type ReactNode } from 'react'
+import { useCallback, useState, type ReactNode } from 'react'
 import {
   agentById,
+  channelName,
   createChannel,
+  deleteConversation,
+  markRead,
   navigate,
+  openDialog,
+  openDm,
   pendingApprovals,
   pendingMemories,
   updateSettings,
   useStore,
   type View
 } from '../store'
+import { ContextMenu, type MenuItem, type MenuState } from './Dialogs'
 import { GettingStarted } from './Onboarding'
 import { AgentAvatar, Icon, type IconName } from './ui'
 
@@ -34,9 +40,55 @@ export function Sidebar(): ReactNode {
   const proposals = s.skills.filter((k) => k.state === 'pending').length
   const [adding, setAdding] = useState(false)
   const [name, setName] = useState('')
+  const [menu, setMenu] = useState<MenuState>(null)
+  const closeMenu = useCallback(() => setMenu(null), [])
+  const open = (e: React.MouseEvent, items: MenuItem[]): void => {
+    e.preventDefault()
+    setMenu({ x: e.clientX, y: e.clientY, items })
+  }
+  const channelMenu = (c: (typeof channels)[number]): MenuItem[] => [
+    { label: 'Adicionar ou remover agentes…', icon: 'users', onClick: () => openDialog({ kind: 'members', id: c.id }) },
+    { label: 'Renomear…', icon: 'edit', onClick: () => openDialog({ kind: 'rename', id: c.id }) },
+    { label: 'Mudar o tema…', icon: 'hash', onClick: () => openDialog({ kind: 'topic', id: c.id }) },
+    {
+      label: c.project ? 'Projeto…' : 'Ligar a um projeto…',
+      icon: 'folder',
+      onClick: () => {
+        navigate({ kind: 'conversation', id: c.id })
+        openDialog({ kind: 'project', id: c.id })
+      }
+    },
+    ...(c.unread ? [{ label: 'Marcar como lido', icon: 'check' as const, onClick: () => markRead(c.id) }] : []),
+    'separator',
+    {
+      label: 'Excluir canal…',
+      icon: 'trash',
+      danger: true,
+      onClick: () => {
+        if (confirm(`Excluir #${c.name}?\n\nAs mensagens, as rotinas que postam nele e a memória do projeto vão junto. Os agentes continuam existindo. Não dá pra desfazer.`)) void deleteConversation(c.id)
+      }
+    }
+  ]
+  const dmMenu = (id: string, agentId: string, agentName: string): MenuItem[] => [
+    { label: `Ver ${agentName}`, icon: 'eye', onClick: () => navigate({ kind: 'agent', id: agentId }) },
+    { label: 'Marcar como lido', icon: 'check', onClick: () => markRead(id) },
+    'separator',
+    {
+      label: 'Apagar a conversa…',
+      icon: 'trash',
+      danger: true,
+      onClick: () => {
+        if (confirm(`Apagar a conversa com ${agentName}?\n\nAs mensagens e as rotinas desta DM vão junto. ${agentName} continua existindo.`)) void deleteConversation(id)
+      }
+    }
+  ]
+  const agentMenu = (agentId: string): MenuItem[] => [
+    { label: 'Mandar mensagem', icon: 'send', onClick: () => void openDm(agentId) },
+    { label: 'Editar', icon: 'edit', onClick: () => navigate({ kind: 'agent', id: agentId }) }
+  ]
 
   const submitChannel = (): void => {
-    const clean = name.trim().toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9_-]/g, '')
+    const clean = channelName(name)
     if (clean) void createChannel(clean)
     setName('')
     setAdding(false)
@@ -87,7 +139,9 @@ export function Sidebar(): ReactNode {
             </button>
           </div>
           {channels.map((c) => (
-            <ChannelItem key={c.id} id={c.id} name={c.name} unread={c.unread} />
+            <div key={c.id} onContextMenu={(e) => open(e, channelMenu(c))}>
+              <ChannelItem id={c.id} name={c.name} unread={c.unread} />
+            </div>
           ))}
           {adding && (
             <form
@@ -117,7 +171,11 @@ export function Sidebar(): ReactNode {
           {dms.map((c) => {
             const agent = agentById(s, c.name)
             if (!agent) return null
-            return <DmItem key={c.id} id={c.id} name={agent.name} color={agent.color} />
+            return (
+              <div key={c.id} onContextMenu={(e) => open(e, dmMenu(c.id, agent.id, agent.name))}>
+                <DmItem id={c.id} name={agent.name} color={agent.color} />
+              </div>
+            )
           })}
         </div>
 
@@ -131,12 +189,15 @@ export function Sidebar(): ReactNode {
           {s.agents
             .filter((a) => !a.archived)
             .map((a) => (
-              <AgentItem key={a.id} id={a.id} />
+              <div key={a.id} onContextMenu={(e) => open(e, agentMenu(a.id))}>
+                <AgentItem id={a.id} />
+              </div>
             ))}
         </div>
       </nav>
 
       {s.settings.onboarding?.done && !s.settings.onboarding.checklistHidden && <GettingStarted />}
+      <ContextMenu menu={menu} onClose={closeMenu} />
       <div className="sidebar__foot">
         <NavItem view={{ kind: 'usage' }} icon="chart" label="Uso e limites" />
         <NavItem view={{ kind: 'connectors' }} icon="plug" label="Conectores" />

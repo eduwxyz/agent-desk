@@ -8,7 +8,7 @@ import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import type { MessagePortMain } from 'electron'
 import type { Api, CoreEvent, Method, Request, Wire } from '../shared/rpc'
-import { ENGINES, inQuietHours, WEBHOOK_PORT, type Agent, type BrowserReply, type Message, type EngineId, type EngineStatus, type Settings } from '../shared/types'
+import { channelName, ENGINES, inQuietHours, projectScope, WEBHOOK_PORT, type Agent, type BrowserReply, type Message, type EngineId, type EngineStatus, type Settings } from '../shared/types'
 import { Db } from './db'
 import { claudeEngine } from './engines/claude'
 import { codexEngine } from './engines/codex'
@@ -389,6 +389,43 @@ const api: Api = {
     emit({ type: 'agent', agent: db.agent(clean.id)! })
     emitConversations(changed)
     if (changed.length) syncProjectFolders()
+  },
+
+  renameChannel: ({ id, name }) => {
+    const conv = db.conversation(id)
+    if (conv?.kind !== 'channel') return
+    const clean = channelName(name)
+    if (!clean) throw new Error('Dê um nome ao canal.')
+    if (db.conversations().some((c) => c.kind === 'channel' && c.name === clean && c.id !== id)) throw new Error(`Já existe o canal #${clean}.`)
+    db.renameConversation(id, clean)
+    emitConversations([id])
+  },
+  setTopic: ({ id, topic }) => {
+    if (db.conversation(id)?.kind !== 'channel') return
+    db.setTopic(id, topic.trim() || undefined)
+    emitConversations([id])
+  },
+  setChannelMembers: ({ id, agentIds }) => {
+    if (db.conversation(id)?.kind !== 'channel') return
+    const known = new Set(db.agents().filter((a) => !a.archived).map((a) => a.id))
+    db.setMembers(id, agentIds.filter((a) => known.has(a)))
+    emitConversations([id])
+    syncProjectFolders() // an agent that left gives the project folder back
+  },
+  // Everything that only made sense there goes too: replies still running stop,
+  // its routines, its project memory, the folders it lent.
+  deleteConversation: ({ id }) => {
+    if (!db.conversation(id)) return
+    for (const m of db.messages()) if (m.conversationId === id && (m.run?.status === 'working' || m.run?.status === 'waiting_approval')) runner.stop(m.id)
+    for (const r of db.routines()) if (r.conversationId === id) routines.remove(r.id)
+    for (const m of db.memories({ scope: projectScope(id) })) {
+      db.deleteMemory(m.id)
+      emit({ type: 'memory_removed', id: m.id })
+    }
+    for (const a of db.approvals()) if (a.conversationId === id && a.state === 'pending' && db.decideApproval(a.id, 'expired', 'O canal foi excluído.')) emit({ type: 'approval', approval: db.approvals().find((x) => x.id === a.id)! })
+    db.deleteConversation(id)
+    emit({ type: 'conversation_removed', id })
+    syncProjectFolders()
   },
 
   createChannel: ({ name }) => {

@@ -386,6 +386,27 @@ export class Db {
     })
   }
 
+  renameConversation(id: string, name: string): void {
+    this.db.prepare('UPDATE conversations SET name = ? WHERE id = ?').run(name, id)
+  }
+
+  setTopic(id: string, topic: string | undefined): void {
+    this.db.prepare('UPDATE conversations SET topic = ? WHERE id = ?').run(topic ?? null, id)
+  }
+
+  // Exactly these agents in the conversation.
+  setMembers(id: string, agentIds: string[]): void {
+    this.tx(() => {
+      this.db.prepare('DELETE FROM members WHERE conversation_id = ?').run(id)
+      for (const a of new Set(agentIds)) this.db.prepare('INSERT INTO members (conversation_id, agent_id) VALUES (?, ?)').run(id, a)
+    })
+  }
+
+  // Its messages and members go with it (foreign keys).
+  deleteConversation(id: string): void {
+    this.db.prepare('DELETE FROM conversations WHERE id = ?').run(id)
+  }
+
   // Puts the agent in exactly these channels (DMs are untouched).
   setAgentChannels(agentId: string, channelIds: string[]): string[] {
     const changed: string[] = []

@@ -65,8 +65,11 @@ export interface State {
   skills: Skill[]
   packaged: boolean
   panel: Panel | null // the side panel next to a conversation
+  dialog: Dialog | null // a channel's members, name or topic, or its project panel
   demoServer?: { command: string; args: string[] }
 }
+
+export type Dialog = { kind: 'members' | 'rename' | 'topic' | 'project'; id: string }
 
 export type Panel = { kind: 'artifact'; id: string } | { kind: 'service'; agentId: string; name: string } | { kind: 'browser'; agentId: string }
 
@@ -106,7 +109,8 @@ let state: State = {
   routines: [],
   skills: [],
   packaged: false,
-  panel: null
+  panel: null,
+  dialog: null
 }
 
 // ---------- store plumbing ----------
@@ -204,6 +208,18 @@ function apply(e: CoreEvent): void {
       }
       case 'routine':
         return { ...s, routines: upsert(s.routines, e.routine) }
+      case 'conversation_removed': {
+        const left = s.conversations.filter((c) => c.id !== e.id)
+        const here = s.view?.kind === 'conversation' && s.view.id === e.id
+        const first = left.find((c) => c.kind === 'channel') ?? left[0]
+        return {
+          ...s,
+          conversations: left,
+          messages: s.messages.filter((m) => m.conversationId !== e.id),
+          view: here ? (first ? { kind: 'conversation', id: first.id } : { kind: 'new-agent' }) : s.view,
+          panel: here ? null : s.panel
+        }
+      }
       case 'routine_removed':
         return { ...s, routines: s.routines.filter((r) => r.id !== e.id) }
       case 'skill':
@@ -301,9 +317,11 @@ export function newAgentDraft(): Agent {
 // Creates a channel and stays where it is (the caller decides where to go).
 export const newChannel = (name: string): Promise<string> => call('createChannel', { name })
 
+// A new channel opens with the window to pick who's in it.
 export async function createChannel(name: string): Promise<void> {
   const id = await call('createChannel', { name })
   navigate({ kind: 'conversation', id })
+  set((s) => ({ ...s, dialog: { kind: 'members', id } }))
 }
 
 export async function openDm(agentId: string): Promise<void> {
@@ -323,6 +341,12 @@ export const addConnector = (input: ConnectorInput): Promise<string> => call('ad
 export const removeConnector = (id: string): void => void call('removeConnector', { id })
 export const reconnectConnector = (id: string): void => void call('reconnectConnector', { id })
 export const authorizeConnector = (id: string): void => void call('authorizeConnector', { id })
+
+export const renameChannel = (id: string, name: string): Promise<void> => call('renameChannel', { id, name })
+export const setTopic = (id: string, topic: string): Promise<void> => call('setTopic', { id, topic })
+export const setChannelMembers = (id: string, agentIds: string[]): Promise<void> => call('setChannelMembers', { id, agentIds })
+export const deleteConversation = (id: string): Promise<void> => call('deleteConversation', { id })
+export const markRead = (id: string): void => set((s) => ({ ...s, conversations: s.conversations.map((c) => (c.id === id ? { ...c, unread: 0 } : c)) }))
 
 export const sendMessage = (conversationId: string, text: string): void => {
   if (text.trim()) void call('sendMessage', { conversationId, text })
@@ -353,6 +377,7 @@ export function patchAgent(agentId: string, patch: Partial<Agent>): void {
 }
 
 export const openPanel = (panel: Panel | null): void => set((s) => ({ ...s, panel }))
+export const openDialog = (dialog: Dialog | null): void => set((s) => ({ ...s, dialog }))
 export const computerAction = (agentId: string, action: 'start' | 'restart' | 'erase' | 'open_folder' | 'refresh'): void =>
   void call('computerAction', { agentId, action })
 export const stopService = (agentId: string, name: string): void => void call('stopService', { agentId, name })

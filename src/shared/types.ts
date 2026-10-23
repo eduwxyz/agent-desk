@@ -83,6 +83,17 @@ export interface Project {
 export const PROJECT_FILES = ['CLAUDE.md', 'AGENTS.md', 'README.md']
 export const projectScope = (conversationId: string): string => `project:${conversationId}`
 
+// "Lançamento do App" → "lancamento-do-app": lowercase, no accents, hyphens.
+export const channelName = (s: string): string =>
+  s
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, '-')
+    .replace(/[^a-z0-9_-]/g, '')
+    .slice(0, 60)
+
 export type StepStatus = 'running' | 'done' | 'error'
 export interface Step {
   id: string

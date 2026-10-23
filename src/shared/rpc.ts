@@ -27,6 +27,10 @@ export interface Api {
   continueRun(p: { messageId: string }): void // a reply paused at its budget goes on
   saveAgent(p: { agent: Agent; channelIds: string[] }): void
   createChannel(p: { name: string }): string
+  renameChannel(p: { id: string; name: string }): void // throws a message when the name is taken
+  setTopic(p: { id: string; topic: string }): void
+  setChannelMembers(p: { id: string; agentIds: string[] }): void
+  deleteConversation(p: { id: string }): void // a channel or a DM, with its messages, routines and project memory
   openDm(p: { agentId: string }): string
   updateSettings(p: { patch: Partial<Omit<Settings, 'engines'>> }): void
   refreshEngines(): void
@@ -95,6 +99,7 @@ export type CoreEvent =
   | { type: 'artifact'; artifact: Artifact }
   | { type: 'routine'; routine: Routine }
   | { type: 'routine_removed'; id: string }
+  | { type: 'conversation_removed'; id: string }
   | { type: 'skill'; skill: Skill }
   | { type: 'skill_removed'; id: string }
 

@@ -8,6 +8,7 @@ import { RoutinesPage } from './components/Routines'
 import { SkillsPage } from './components/Skills'
 import { ReportPage } from './components/Report'
 import { Onboarding } from './components/Onboarding'
+import { Dialogs } from './components/Dialogs'
 
 export function App(): ReactNode {
   const view = useStore((s) => s.view)
@@ -38,6 +39,7 @@ export function App(): ReactNode {
         {view.kind === 'report' && <ReportPage />}
         {view.kind === 'settings' && <SettingsPage />}
       </main>
+      <Dialogs />
     </div>
   )
 }
