@@ -6,7 +6,7 @@ import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { randomBytes } from 'node:crypto'
 import type { CoreEvent } from '../shared/rpc'
-import { ENGINES, modelInfo, projectScope, SUMMARY_MAX_AFTER, SUMMARY_WINDOW, type Agent, type Conversation, type EngineId, type Memory, type MemoryScope, type Message, type Settings } from '../shared/types'
+import { ENGINES, usable, modelInfo, projectScope, SUMMARY_MAX_AFTER, SUMMARY_WINDOW, type Agent, type Conversation, type EngineId, type Memory, type MemoryScope, type Message, type Settings } from '../shared/types'
 import type { Db } from './db'
 import type { Engine } from './engines/types'
 import type { ToolDef } from './gateway'
@@ -172,7 +172,7 @@ export class Memories {
     if (chunk.length === 0) return
 
     const settings = await this.deps.settings()
-    const model = modelInfo(settings.memoryModel) ?? modelInfo('haiku')!
+    const model = usable(modelInfo(settings.memoryModel)) ?? modelInfo('haiku')!
     const status = settings.engines[model.engine]
     if (!status.installed || !status.loggedIn) return console.log(`[memory] skipped: ${ENGINES[model.engine].label} not ready`)
 

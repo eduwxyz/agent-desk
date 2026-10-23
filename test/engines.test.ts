@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest'
 import type { Parser } from '../src/core/engines/cli'
 import { claudeArgs, claudeInput, claudeParser, userProvider } from '../src/core/engines/claude'
 import { CODEX_DISABLED_FEATURES, codexArgs, codexEnv, codexParser, userCodexProvider } from '../src/core/engines/codex'
-import { customModel, modelInfo } from '../src/shared/types'
+import { customModel, modelInfo, usable } from '../src/shared/types'
 import type { EngineEvent } from '../src/core/engines/types'
 
 // Fixtures are real CLI output (Claude Code 2.1.286, Codex 0.153.4), trimmed of local paths.
@@ -112,6 +112,9 @@ describe('Claude Code stream', () => {
     expect(modelInfo('claude:us.anthropic.claude-sonnet-4-5:0')).toMatchObject({ id: 'us.anthropic.claude-sonnet-4-5:0', engine: 'claude' })
     expect(modelInfo('claude:')?.id).toBe('')
     expect(modelInfo('qualquer')).toBeUndefined()
+    // the router and the memory fall back to the default while the name is empty
+    expect(usable(modelInfo('claude:'))).toBeUndefined()
+    expect(usable(modelInfo('claude:gw-haiku'))?.id).toBe('gw-haiku')
   })
 
   it('sends the conversation as one text block per message, so the next turn reads them from the cache', () => {

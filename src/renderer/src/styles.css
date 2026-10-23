@@ -3443,3 +3443,7 @@ table.csv th {
   font-size: 16px;
   opacity: 0;
 }
+.model-name {
+  margin-top: 8px;
+  font-family: var(--mono);
+}

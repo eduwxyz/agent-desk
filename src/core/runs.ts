@@ -3,7 +3,7 @@ import { basename, join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import type { CoreEvent } from '../shared/rpc'
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
-import { ACCESS_REQUEST, CACHE_READ_WEIGHT, describeSchedule, workIn, ENGINES, ERRORS_STOP, modelInfo, REPEAT_STOP, REPEAT_WARN, RUN_BUDGET_PCT, RUN_STALL_MINUTES, type Agent, type Approval, type Connector, type ConnectorTool, type Conversation, type EngineId, type Message, type Quota, type Receipt, type Routine, type Run, type RunStatus, type Settings, type Step } from '../shared/types'
+import { ACCESS_REQUEST, CACHE_READ_WEIGHT, describeSchedule, workIn, ENGINES, ERRORS_STOP, usable, modelInfo, REPEAT_STOP, REPEAT_WARN, RUN_BUDGET_PCT, RUN_STALL_MINUTES, type Agent, type Approval, type Connector, type ConnectorTool, type Conversation, type EngineId, type Message, type Quota, type Receipt, type Routine, type Run, type RunStatus, type Settings, type Step } from '../shared/types'
 import { HISTORY_LIMIT, mentioned, systemPrompt, transcript } from './context'
 import { LEMBRAR, type Memories } from './memory'
 import { BROWSER_TOOL_NAMES, BROWSER_TOOLS, browserStep, NAVEGADOR, type Browser } from './browser'
@@ -308,7 +308,7 @@ export class Runner {
         fellBack = ` · o Jev falhou (${j.error}), o Haiku decidiu`
       }
 
-      const model = modelInfo(settings.routerModel) ?? modelInfo('haiku')!
+      const model = usable(modelInfo(settings.routerModel)) ?? modelInfo('haiku')!
       const status = settings.engines[model.engine]
       if (!status.installed || !status.loggedIn) return fail(`o ${ENGINES[model.engine].label} não está pronto`)
 

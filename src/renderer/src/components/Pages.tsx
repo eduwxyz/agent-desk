@@ -1198,6 +1198,46 @@ function AddConnector({ onDone }: { onDone: (id?: string) => void }): ReactNode 
   )
 }
 
+// A model from the list, or any name a company gateway gives one ("Outro modelo"), kept as "<engine>:<name>".
+function ModelSelect({ value, onChange, jev }: { value: string; onChange: (v: string) => void; jev?: boolean }): ReactNode {
+  const models = useStore((s) => s.models)
+  const listed = value === 'jev' || models.some((m) => m.id === value)
+  const custom = listed ? undefined : modelInfo(value)
+  return (
+    <>
+      <select
+        value={custom ? `custom:${custom.engine}` : value}
+        onChange={(e) => {
+          const v = e.target.value
+          onChange(v.startsWith('custom:') ? customModel(v.slice(7) as EngineId, custom?.id ?? '') : v)
+        }}
+      >
+        {models.map((m) => (
+          <option key={m.id} value={m.id}>
+            {ENGINES[m.engine].label} · {m.label}
+          </option>
+        ))}
+        {jev && <option value="jev">TypeSafe · Jev (chave própria)</option>}
+        {(Object.keys(ENGINES) as EngineId[]).map((e) => (
+          <option key={e} value={`custom:${e}`}>
+            {ENGINES[e].label} · Outro modelo…
+          </option>
+        ))}
+      </select>
+      {custom && (
+        <input
+          className="model-name"
+          value={custom.id}
+          placeholder="O nome exato que o gateway da sua empresa usa"
+          spellCheck={false}
+          autoFocus={!custom.id}
+          onChange={(e) => onChange(customModel(custom.engine, e.target.value))}
+        />
+      )}
+    </>
+  )
+}
+
 export function Toggle({ on, onChange }: { on: boolean; onChange: (v: boolean) => void }): ReactNode {
   return <button className={`toggle ${on ? 'is-on' : ''}`} role="switch" aria-checked={on} onClick={() => onChange(!on)} />
 }
@@ -1473,14 +1513,7 @@ export function SettingsPage(): ReactNode {
 
         <Card title="Router" lead="Modelo pequeno que lê a conversa e decide quem responde. Não concede permissão nenhuma.">
           <Field label="Modelo do router" hint="Prefira um modelo rápido: ele roda antes de cada resposta num canal.">
-            <select value={settings.routerModel} onChange={(e) => updateSettings({ routerModel: e.target.value })}>
-              {models.map((m) => (
-                <option key={m.id} value={m.id}>
-                  {ENGINES[m.engine].label} · {m.label}
-                </option>
-              ))}
-              <option value="jev">TypeSafe · Jev (chave própria)</option>
-            </select>
+            <ModelSelect value={settings.routerModel} onChange={(routerModel) => updateSettings({ routerModel })} jev />
           </Field>
           {settings.routerModel === 'jev' && <JevKey saved={!!settings.jevKey} />}
         </Card>
@@ -1506,13 +1539,7 @@ export function SettingsPage(): ReactNode {
         <Card title="Memória" lead="Um modelo pequeno resume o que sai da janela de cada conversa e, do mesmo trecho, tira o que vale lembrar sobre você.">
           <div className="grid2">
             <Field label="Modelo da memória" hint="Roda a cada ~20 mensagens numa conversa longa.">
-              <select value={settings.memoryModel} onChange={(e) => updateSettings({ memoryModel: e.target.value })}>
-                {models.map((m) => (
-                  <option key={m.id} value={m.id}>
-                    {ENGINES[m.engine].label} · {m.label}
-                  </option>
-                ))}
-              </select>
+              <ModelSelect value={settings.memoryModel} onChange={(memoryModel) => updateSettings({ memoryModel })} />
             </Field>
             <Field label="O que ele aprende sobre você" hint="Só conta o que você disse, nunca o que um agente supôs.">
               <select value={settings.memoryLearning} onChange={(e) => updateSettings({ memoryLearning: e.target.value as typeof settings.memoryLearning })}>

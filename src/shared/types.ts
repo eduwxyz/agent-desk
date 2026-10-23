@@ -258,6 +258,9 @@ export const EFFORTS: { id: Effort; label: string }[] = [
 
 // A model the app doesn't list, by the name a company gateway gives it: kept as "<engine>:<name>".
 export const customModel = (engine: EngineId, name: string): string => `${engine}:${name.trim()}`
+// A model to run with: a custom one with no name yet falls back to the default.
+export const usable = (m: Model | undefined): Model | undefined => (m?.id ? m : undefined)
+
 export const modelInfo = (id: string): Model | undefined => {
   const listed = MODELS.find((m) => m.id === id)
   if (listed) return listed
