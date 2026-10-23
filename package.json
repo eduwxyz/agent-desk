@@ -1,6 +1,6 @@
 {
   "name": "agent-desk",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "private": true,
   "description": "Desktop chat where you work with a team of AI agents, with scopes, approvals and budgets.",
   "license": "Apache-2.0",
@@ -14,7 +14,8 @@
     "test": "vitest run",
     "test:e2e": "npm run build && node --test e2e/",
     "dist": "npm run build && electron-builder --mac --dir --config.directories.output=\"$HOME/Library/Caches/agent-desk/dist\"",
-    "install-app": "npm run dist && sh scripts/install-app.sh"
+    "install-app": "npm run dist && sh scripts/install-app.sh",
+    "release": "sh scripts/release.sh"
   },
   "devDependencies": {
     "@types/node": "^26.6.5",
