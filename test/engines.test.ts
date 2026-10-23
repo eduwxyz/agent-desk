@@ -1,8 +1,9 @@
-import { readFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import type { Parser } from '../src/core/engines/cli'
-import { claudeArgs, claudeInput, claudeParser } from '../src/core/engines/claude'
+import { claudeArgs, claudeInput, claudeParser, userProvider } from '../src/core/engines/claude'
 import { CODEX_DISABLED_FEATURES, codexArgs, codexEnv, codexParser } from '../src/core/engines/codex'
 import type { EngineEvent } from '../src/core/engines/types'
 
@@ -72,6 +73,17 @@ describe('Claude Code stream', () => {
     expect(args[args.indexOf('--setting-sources') + 1]).toBe('')
     expect(args[args.indexOf('--system-prompt') + 1]).toBe('x')
     expect(args).not.toContain('--bare')
+  })
+
+  it("takes only how to reach the model from the user's settings: env and apiKeyHelper, not hooks or plugins", () => {
+    const dir = mkdtempSync(join(tmpdir(), 'claude-settings-'))
+    writeFileSync(join(dir, 'settings.json'), JSON.stringify({ env: { ANTHROPIC_BASE_URL: 'https://llm.empresa.com', N: 1 }, apiKeyHelper: '~/bin/chave', hooks: { Stop: [] }, enabledPlugins: { x: true } }))
+    expect(userProvider(dir)).toEqual({ env: { ANTHROPIC_BASE_URL: 'https://llm.empresa.com' }, apiKeyHelper: '~/bin/chave' })
+    expect(userProvider(join(dir, 'nada'))).toEqual({ env: {} })
+    const args = claudeArgs({ model: 'sonnet', effort: 'low', system: 'x' }, '~/bin/chave')
+    expect(JSON.parse(args[args.indexOf('--settings') + 1]!)).toEqual({ apiKeyHelper: '~/bin/chave' })
+    expect(args[args.indexOf('--setting-sources') + 1]).toBe('')
+    expect(claudeArgs({ model: 'sonnet', effort: 'low', system: 'x' })).not.toContain('--settings')
   })
 
   it('sends the conversation as one text block per message, so the next turn reads them from the cache', () => {

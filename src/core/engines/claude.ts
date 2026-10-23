@@ -1,15 +1,38 @@
+import { readFileSync } from 'node:fs'
+import { homedir } from 'node:os'
+import { join } from 'node:path'
 import { lastLines, num, parseJson, runCli, type Parser } from './cli'
 import type { Engine, EngineEvent, Turn } from './types'
 
 export const GATEWAY_NAME = 'agentdesk'
 const WEB_TOOLS = ['WebSearch', 'WebFetch'] // run on Anthropic's side, on the subscription
 
+// How the user's own Claude Code reaches the model, from their settings.json:
+// the `env` block (a company gateway: ANTHROPIC_BASE_URL and its token, or
+// Bedrock/Vertex) and `apiKeyHelper` (a script that prints the key). The rest
+// of that file (hooks, plugins, permissions, MCP servers) stays out. Read at
+// every turn, so a change there counts from the next reply.
+export interface Provider {
+  env: Record<string, string>
+  apiKeyHelper?: string
+}
+
+export function userProvider(dir = process.env['CLAUDE_CONFIG_DIR'] || join(homedir(), '.claude')): Provider {
+  try {
+    const s = JSON.parse(readFileSync(join(dir, 'settings.json'), 'utf8')) as { env?: unknown; apiKeyHelper?: unknown }
+    const env = s.env && typeof s.env === 'object' ? Object.fromEntries(Object.entries(s.env).filter((e): e is [string, string] => typeof e[1] === 'string')) : {}
+    return { env, ...(typeof s.apiKeyHelper === 'string' && s.apiKeyHelper.trim() ? { apiKeyHelper: s.apiKeyHelper } : {}) }
+  } catch {
+    return { env: {} }
+  }
+}
+
 // Flags that keep the CLI isolated: no built-in tools (shell, files), no
 // user settings, hooks, plugins or MCP servers, and no saved session. Not
 // --bare: it turns off the subscription login. The app's gateway, when given,
 // is the only MCP server, and its tools are pre-allowed: the gateway decides.
 // With web, the only built-in tools are web search and page reading.
-export function claudeArgs(turn: Pick<Turn, 'model' | 'effort' | 'system' | 'mcpUrl' | 'web' | 'blocks'>): string[] {
+export function claudeArgs(turn: Pick<Turn, 'model' | 'effort' | 'system' | 'mcpUrl' | 'web' | 'blocks'>, apiKeyHelper?: string): string[] {
   const web = turn.web ? WEB_TOOLS : []
   const allowed = [...(turn.mcpUrl ? [`mcp__${GATEWAY_NAME}`] : []), ...web]
   const gateway = turn.mcpUrl ? ['--mcp-config', JSON.stringify({ mcpServers: { [GATEWAY_NAME]: { type: 'http', url: turn.mcpUrl } } })] : []
@@ -26,6 +49,8 @@ export function claudeArgs(turn: Pick<Turn, 'model' | 'effort' | 'system' | 'mcp
     '--strict-mcp-config',
     '--setting-sources', '',
     '--no-session-persistence',
+    // --settings still applies with no setting sources; only the key helper goes in it
+    ...(apiKeyHelper ? ['--settings', JSON.stringify({ apiKeyHelper })] : []),
     ...gateway,
     ...(allowed.length ? ['--allowedTools', ...allowed] : [])
   ]
@@ -135,7 +160,9 @@ export function claudeEngine(bin: () => string | undefined): Engine {
         yield { type: 'error', message: 'O Claude Code não está instalado. Veja em Configurações.' }
         return
       }
-      yield* runCli({ bin: path, args: claudeArgs(turn), stdin: claudeInput(turn), cwd: turn.cwd, signal: turn.signal, parser: claudeParser(), env: { ...process.env, MCP_TOOL_TIMEOUT: '900000' } })
+      // The gateway's token goes in the environment, never in the arguments (other processes can read those).
+      const provider = userProvider()
+      yield* runCli({ bin: path, args: claudeArgs(turn, provider.apiKeyHelper), stdin: claudeInput(turn), cwd: turn.cwd, signal: turn.signal, parser: claudeParser(), env: { ...process.env, ...provider.env, MCP_TOOL_TIMEOUT: '900000' } })
     }
   }
 }

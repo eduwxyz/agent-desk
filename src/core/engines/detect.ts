@@ -2,6 +2,7 @@ import { execFile } from 'node:child_process'
 import { access, constants } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { EngineId, EngineStatus } from '../../shared/types'
+import { userProvider } from './claude'
 import { codexEnv } from './codex'
 
 function run(bin: string, args: string[], timeout = 15_000, env: NodeJS.ProcessEnv = process.env): Promise<{ code: number; stdout: string; stderr: string }> {
@@ -51,6 +52,8 @@ export async function detectClaude(): Promise<EngineStatus> {
   const loggedIn = status['loggedIn'] === true
   const subscription = typeof status['subscriptionType'] === 'string' ? status['subscriptionType'] : undefined
   const viaSubscription = status['authMethod'] === 'claude.ai'
+  const gateway = gatewayHost(userProvider().env['ANTHROPIC_BASE_URL'])
+  if (gateway) return { installed: true, path, version: version(v.stdout), loggedIn: true, account: `Gateway ${gateway} · pelo seu settings.json` }
   return {
     installed: true,
     path,
@@ -58,6 +61,14 @@ export async function detectClaude(): Promise<EngineStatus> {
     loggedIn,
     account: loggedIn ? (viaSubscription ? `Assinatura Claude${subscription ? ` ${subscription[0]!.toUpperCase()}${subscription.slice(1)}` : ''}` : 'Chave de API') : undefined,
     warning: loggedIn && !viaSubscription ? 'Logado com chave de API: o uso será cobrado por token.' : undefined
+  }
+}
+
+const gatewayHost = (url: string | undefined): string | undefined => {
+  try {
+    return url ? new URL(url).host : undefined
+  } catch {
+    return url
   }
 }
 
