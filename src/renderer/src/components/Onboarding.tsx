@@ -2,7 +2,7 @@
 // agent and what it can use, and its first task, sent from here so the person
 // lands in a channel watching it work. Then "Primeiros passos" in the sidebar
 // walks through the rest, checking itself off as each feature gets used.
-import { useEffect, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useState, type ReactNode } from 'react'
 import {
   ENGINES,
   MODELS,
@@ -23,6 +23,7 @@ import {
   type View
 } from '../store'
 import { Toggle } from './Pages'
+import { Splash } from './Splash'
 import { AgentAvatar, Icon, MeAvatar, type IconName } from './ui'
 
 type Computer = 'none' | 'linux' | 'mac'
@@ -152,6 +153,8 @@ export function Onboarding(): ReactNode {
   const [computer, setComputer] = useState<Computer>('none')
   const [task, setTask] = useState(TEMPLATES[0]!.tasks[0]!)
   const [busy, setBusy] = useState(false)
+  const [opening, setOpening] = useState(true)
+  const opened = useCallback(() => setOpening(false), [])
 
   const models = readyModels(settings.engines)
   const ready = [...new Set(models.map((m) => m.engine))]
@@ -195,6 +198,8 @@ export function Onboarding(): ReactNode {
       setBusy(false)
     }
   }
+
+  if (opening) return <Splash onDone={opened} />
 
   return (
     <div className="onb">
